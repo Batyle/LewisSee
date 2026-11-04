@@ -1,0 +1,8 @@
+{
+  "rules": {
+    "face-attendance": {
+      ".read": "auth != null && auth.token.staff === true",
+      ".write": "auth != null && auth.token.staff === true"
+    }
+  }
+}
