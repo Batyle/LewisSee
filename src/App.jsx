@@ -426,7 +426,10 @@ export default function App() {
       const b = d.detection.box,
         found = matches[index],
         isSpoof = livenessState === "spoof" && Boolean(found),
-        x = b.x * sx,
+        // The preview video is mirrored like a normal selfie camera. Mirror
+        // coordinates in drawing code instead of mirroring the canvas so text
+        // labels remain readable.
+        x = c.width - (b.x + b.width) * sx,
         y = b.y * sy,
         w = b.width * sx,
         h = b.height * sy,
@@ -440,11 +443,11 @@ export default function App() {
           : colors.getPropertyValue("--warning");
       ctx.lineWidth = 3;
       ctx.strokeRect(x, y, w, h);
+      ctx.font = "600 14px system-ui";
       ctx.fillStyle = colors.getPropertyValue("--primary");
       const labelWidth = Math.max(130, ctx.measureText(label).width + 16);
       ctx.fillRect(x, Math.max(0, y - 27), labelWidth, 25);
       ctx.fillStyle = colors.getPropertyValue("--surface");
-      ctx.font = "600 14px system-ui";
       ctx.fillText(label, x + 8, Math.max(17, y - 9));
     });
   }, []);
@@ -1080,7 +1083,7 @@ export default function App() {
           </div>
           <div className={`camera-wrap ${ready ? "visible" : ""}`}>
             <video ref={video} muted playsInline />
-            <canvas ref={overlay} />
+            <canvas ref={overlay} style={{ transform: "none" }} />
             {!ready && (
               <Loader
                 stage={stage}
