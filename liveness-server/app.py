@@ -162,11 +162,11 @@ def ensure_schema(connection: Any) -> None:
         cursor.execute("SHOW COLUMNS FROM students")
         student_columns = {row["Field"] for row in cursor.fetchall()}
         if "course" not in student_columns:
-            cursor.execute("ALTER TABLE students ADD COLUMN course VARCHAR(64) NOT NULL DEFAULT 'UNASSIGNED' AFTER email")
+            cursor.execute("ALTER TABLE students ADD COLUMN course VARCHAR(64) NOT NULL DEFAULT 'BSIT' AFTER email")
         if "year_level" not in student_columns:
-            cursor.execute("ALTER TABLE students ADD COLUMN year_level TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER course")
+            cursor.execute("ALTER TABLE students ADD COLUMN year_level TINYINT UNSIGNED NOT NULL DEFAULT 3 AFTER course")
         if "block" not in student_columns:
-            cursor.execute("ALTER TABLE students ADD COLUMN block VARCHAR(12) NOT NULL DEFAULT 'UNASSIGNED' AFTER year_level")
+            cursor.execute("ALTER TABLE students ADD COLUMN block VARCHAR(12) NOT NULL DEFAULT 'A' AFTER year_level")
         cursor.execute("SHOW INDEX FROM students WHERE Key_name = 'unique_student_name'")
         if not cursor.fetchone():
             cursor.execute("CREATE UNIQUE INDEX unique_student_name ON students (name)")
