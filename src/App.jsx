@@ -281,6 +281,7 @@ export default function App() {
     [online, setOnline] = useState(true),
     [connection, setConnection] = useState("standby"),
     [notifications, setNotifications] = useState([]),
+    [systemAlert, setSystemAlert] = useState(""),
     [debug, setDebug] = useState({ fps: 0, ms: 0 });
   const [access, setAccess] = useState(
       TEST_STAFF_ACCESS
@@ -302,6 +303,9 @@ export default function App() {
     const [nextCourse, nextYear, nextBlock] = value.split("|");
     change({ course: nextCourse, yearLevel: nextYear, block: nextBlock });
   };
+  const showError = useCallback((cause, fallback) => {
+    setSystemAlert(cause?.message || cause || fallback);
+  }, []);
 
   useEffect(() => {
     store("attendance-students", students);
@@ -348,19 +352,26 @@ export default function App() {
         setClasses(initial.classes?.length ? initial.classes : DEFAULT_CLASSES);
         setCloudLoaded(true);
       })
-      .catch((cause) => !cancelled && setAccessError(cause.message || "Could not load the MySQL attendance store."));
+      .catch((cause) => {
+        if (cancelled) return;
+        const message = cause.message || "Could not load the MySQL attendance store.";
+        setAccessError(message);
+        showError(message);
+      });
     return () => { cancelled = true; };
-  }, [access]);
+  }, [access, showError]);
   useEffect(() => {
     if (!cloudLoaded || access !== "granted") return;
     const next = { students, records, classes: activeClasses },
       serialized = JSON.stringify(next);
     if (serialized === lastCloudValue.current) return;
     lastCloudValue.current = serialized;
-    saveAttendanceStore(next).catch((cause) =>
-      setAccessError(cause.message || "Could not save changes to the MySQL attendance store."),
-    );
-  }, [access, activeClasses, cloudLoaded, records, students]);
+    saveAttendanceStore(next).catch((cause) => {
+      const message = cause.message || "Could not save changes to the MySQL attendance store.";
+      setAccessError(message);
+      showError(message);
+    });
+  }, [access, activeClasses, cloudLoaded, records, showError, students]);
   useEffect(() => {
     applyTheme(theme);
     return watchSystemTheme(theme, () => applyTheme("system"));
@@ -624,13 +635,14 @@ export default function App() {
     } catch (cause) {
       stopCamera(stream.current);
       stream.current = null;
-      setError(
+      const message =
         cause.message?.includes("timed") || cause.message?.includes("model")
           ? cause.message
-          : cameraErrorMessage(cause),
-      );
+          : cameraErrorMessage(cause);
+      setError(message);
+      showError(message);
     }
-  }, [loop, stop]);
+  }, [loop, showError, stop]);
   useEffect(() => {
     if (access !== "granted") return undefined;
     start();
@@ -702,7 +714,9 @@ export default function App() {
       setNotice("Student enrolled.");
       setEnrollmentOpen(false);
     } catch (cause) {
-      setNotice(cause.message || "Could not enroll student.");
+      const message = cause.message || "Could not enroll student.";
+      setNotice(message);
+      showError(message);
     } finally {
       setEnrolling(false);
     }
@@ -783,7 +797,9 @@ export default function App() {
       setEditingId(null);
       setNotice("Student information updated.");
     } catch (cause) {
-      setNotice(cause.message || "Could not update student.");
+      const message = cause.message || "Could not update student.";
+      setNotice(message);
+      showError(message);
     } finally {
       setSavingEdit(false);
     }
@@ -950,6 +966,12 @@ export default function App() {
         <div className="offline-banner">
           Internet connection lost — notifications paused
         </div>
+      )}
+      {systemAlert && (
+        <aside className="system-alert" role="alert" aria-live="assertive">
+          <div><b>Something went wrong</b><span>{systemAlert}</span></div>
+          <button type="button" aria-label="Dismiss error notification" onClick={() => setSystemAlert("")}>×</button>
+        </aside>
       )}
       <header className="topbar">
         <div>
