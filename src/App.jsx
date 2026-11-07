@@ -1018,7 +1018,7 @@ export default function App() {
           </button>
         ))}
       </nav>
-      {page === "scan" && <>
+      <section hidden={page !== "scan"} aria-label="Scanner workspace">
       <section className="page-heading">
         <div>
           <p className="eyebrow">LIVE CLASSROOM CHECK-IN</p>
@@ -1139,7 +1139,7 @@ export default function App() {
           </div>
         </article>
       </section>
-      </>}
+      </section>
       {page === "students" && <>
       <section className="page-heading page-heading-compact">
         <div>
