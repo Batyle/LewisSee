@@ -27,4 +27,7 @@ dist-ssr
 liveness-server/.venv/
 liveness-server/__pycache__/
 liveness-server/*.log
+liveness-server/.env
+liveness-server/.env.database
+liveness-server/aiven-ca.pem
 liveness-server/Silent-Face-Anti-Spoofing/

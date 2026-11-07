@@ -6,7 +6,6 @@ import {
   signOut,
   updateProfile,
 } from "firebase/auth";
-import { onValue, ref, set, update } from "firebase/database";
 import {
   cameraErrorMessage,
   createInferenceCanvas,
@@ -24,7 +23,8 @@ import {
   warmDetector,
 } from "./detector";
 import { NotificationConnection } from "./connection";
-import { auth, database } from "./firebase";
+import { auth } from "./firebase";
+import { loadAttendanceStore, saveAttendanceStore } from "./attendanceApi";
 import { applyTheme, getTheme, watchSystemTheme } from "./theme";
 import "./App.css";
 
@@ -60,15 +60,21 @@ const toDataUrl = (file) =>
     reader.readAsDataURL(file);
   });
 const verifyLiveness = async (canvas) => {
+  // Loopback only works during local development. Production builds must be
+  // given a public HTTPS endpoint through VITE_LIVENESS_API_URL.
+  const livenessUrl = import.meta.env.VITE_LIVENESS_API_URL?.trim() ||
+    (import.meta.env.DEV ? "http://127.0.0.1:8000/liveness" : "");
+  if (!livenessUrl)
+    throw new Error("Liveness is not configured for this deployment.");
   const image = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
   if (!image) throw new Error("Could not capture a frame for liveness verification.");
   const body = new FormData();
   body.append("image", image, "camera-frame.jpg");
-  const response = await fetch(import.meta.env.VITE_LIVENESS_API_URL || "http://127.0.0.1:8000/liveness", {
+  const response = await fetch(livenessUrl, {
     method: "POST",
     body,
   });
-  if (!response.ok) throw new Error("Liveness service is unavailable.");
+  if (!response.ok) throw new Error(`Liveness service returned ${response.status}.`);
   return response.json();
 };
 const sendAttendanceEmail = async (student, record) => {
@@ -258,7 +264,7 @@ export default function App() {
   const [access, setAccess] = useState(
       TEST_STAFF_ACCESS
         ? "signed-out"
-        : auth && database
+        : auth
           ? "checking"
           : "unconfigured",
     ),
@@ -277,7 +283,7 @@ export default function App() {
     store("attendance-records", records);
   }, [records]);
   useEffect(() => {
-    if (TEST_STAFF_ACCESS || !auth || !database) return undefined;
+    if (TEST_STAFF_ACCESS || !auth) return undefined;
     return onAuthStateChanged(auth, (user) => {
       setStaffUser(user);
       setCloudLoaded(false);
@@ -285,50 +291,38 @@ export default function App() {
     });
   }, []);
   useEffect(() => {
-    if (TEST_STAFF_ACCESS || !staffUser || !database) return undefined;
-    const attendanceRef = ref(database, "face-attendance");
-    return onValue(
-      attendanceRef,
-      (snapshot) => {
-        const value = snapshot.val();
-        if (value) {
-          const next = {
-            students: Array.isArray(value.students) ? value.students : [],
-            records: Array.isArray(value.records) ? value.records : [],
-          };
-          lastCloudValue.current = JSON.stringify(next);
-          setStudents(next.students);
-          setRecords(next.records);
-        } else {
-          const next = {
-            students: read("attendance-students"),
-            records: read("attendance-records"),
-          };
-          lastCloudValue.current = JSON.stringify(next);
-          set(attendanceRef, next).catch(() =>
-            setAccessError("Could not create the protected attendance store."),
-          );
-        }
+    if (access !== "granted") return undefined;
+    let cancelled = false;
+    setCloudLoaded(false);
+    void loadAttendanceStore()
+      .then((value) => {
+        if (cancelled) return;
+        const next = {
+          students: Array.isArray(value.students) ? value.students : [],
+          records: Array.isArray(value.records) ? value.records : [],
+        };
+        // On a new database, keep local records long enough to migrate them once.
+        const initial = next.students.length || next.records.length
+          ? next
+          : { students: read("attendance-students"), records: read("attendance-records") };
+        lastCloudValue.current = JSON.stringify(next);
+        setStudents(initial.students);
+        setRecords(initial.records);
         setCloudLoaded(true);
-      },
-      () =>
-        setAccessError(
-          "You do not have permission to read the attendance store.",
-        ),
-    );
-  }, [staffUser]);
+      })
+      .catch((cause) => !cancelled && setAccessError(cause.message || "Could not load the MySQL attendance store."));
+    return () => { cancelled = true; };
+  }, [access]);
   useEffect(() => {
-    if (TEST_STAFF_ACCESS || !cloudLoaded || !staffUser || !database) return;
+    if (!cloudLoaded || access !== "granted") return;
     const next = { students, records },
       serialized = JSON.stringify(next);
     if (serialized === lastCloudValue.current) return;
     lastCloudValue.current = serialized;
-    update(ref(database, "face-attendance"), next).catch(() =>
-      setAccessError(
-        "Could not save changes to the protected attendance store.",
-      ),
+    saveAttendanceStore(next).catch((cause) =>
+      setAccessError(cause.message || "Could not save changes to the MySQL attendance store."),
     );
-  }, [cloudLoaded, records, staffUser, students]);
+  }, [access, cloudLoaded, records, students]);
   useEffect(() => {
     applyTheme(theme);
     return watchSystemTheme(theme, () => applyTheme("system"));
@@ -763,7 +757,7 @@ export default function App() {
       <StaffAccess
         error={
           accessError ||
-          (access === "unconfigured" ? "Firebase is not configured." : "")
+          (access === "unconfigured" ? "Staff authentication is not configured." : "")
         }
         onSignIn={(email, password) =>
           TEST_STAFF_ACCESS

@@ -1,4 +1,5 @@
-const MODEL_URL = "/models";
+// BASE_URL is '/<repository>/' on GitHub Pages, rather than '/'.
+const MODEL_URL = `${import.meta.env.BASE_URL}models`;
 // Keep the camera's normal 4:3 shape. Feeding a 16:9 webcam image into a
 // square canvas stretches faces, which makes TinyFaceDetector unreliable.
 export const INFERENCE_WIDTH = 320;

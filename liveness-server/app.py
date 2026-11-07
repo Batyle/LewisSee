@@ -9,11 +9,16 @@ from __future__ import annotations
 
 import os
 import sys
+import json
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Any
 
 import cv2
 import numpy as np
+import pymysql
 from fastapi import FastAPI, File, HTTPException, UploadFile
+from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
 ROOT = Path(__file__).resolve().parent
@@ -27,16 +32,183 @@ from src.generate_patches import CropImage  # noqa: E402
 from src.utility import parse_model_name  # noqa: E402
 
 app = FastAPI(title="FaceAttend liveness service")
+cors_origins = [
+    origin.strip()
+    for origin in os.getenv(
+        "LIVENESS_CORS_ORIGINS",
+        "http://localhost:5173,http://127.0.0.1:5173",
+    ).split(",")
+    if origin.strip()
+]
+cors_origin_regex = os.getenv("LIVENESS_CORS_ORIGIN_REGEX", "").strip() or None
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
-    allow_methods=["POST"],
+    allow_origins=cors_origins,
+    allow_origin_regex=cors_origin_regex,
+    allow_methods=["GET", "POST", "PUT", "OPTIONS"],
     allow_headers=["*"],
 )
 
 models = MODEL_ROOT / "resources" / "anti_spoof_models"
 predictor = AntiSpoofPredict(0)
 cropper = CropImage()
+
+
+class Student(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    studentId: str = Field(min_length=1, max_length=191)
+    email: str = Field(default="", max_length=255)
+    descriptor: list[float] = Field(default_factory=list)
+    photo: str = Field(default="")
+
+
+class AttendanceRecord(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    studentId: str = Field(min_length=1, max_length=191)
+    name: str = Field(min_length=1, max_length=255)
+    date: str = Field(min_length=10, max_length=10)
+    section: str = Field(min_length=1, max_length=191)
+    time: str = Field(min_length=1, max_length=32)
+
+
+class AttendanceStore(BaseModel):
+    students: list[Student]
+    records: list[AttendanceRecord]
+
+
+def database_settings() -> dict[str, Any]:
+    """Read credentials only from service environment variables, never Vite."""
+    required = ("DB_HOST", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD")
+    missing = [name for name in required if not os.getenv(name)]
+    if missing:
+        raise HTTPException(
+            status_code=503,
+            detail="Database is not configured. Set " + ", ".join(missing) + " on the API service.",
+        )
+    settings = {
+        "host": os.environ["DB_HOST"],
+        "port": int(os.getenv("DB_PORT", "3306")),
+        "user": os.environ["DB_USERNAME"],
+        "password": os.environ["DB_PASSWORD"],
+        "database": os.environ["DB_DATABASE"],
+        "charset": "utf8mb4",
+        "cursorclass": pymysql.cursors.DictCursor,
+        "connect_timeout": 10,
+        "autocommit": False,
+    }
+    ssl_mode = os.getenv("DB_SSL_MODE", "").upper()
+    if ssl_mode in {"REQUIRED", "VERIFY_CA", "VERIFY_IDENTITY"}:
+        # Aiven accepts TLS with REQUIRED.  A CA file is only mandatory when
+        # certificate verification is explicitly requested.  This is useful on
+        # container hosts where a certificate file is not mounted as a secret.
+        ssl_settings: dict[str, Any] = {}
+        ca_file = os.getenv("DB_SSL_CA", "").strip()
+        if ssl_mode in {"VERIFY_CA", "VERIFY_IDENTITY"} and not ca_file:
+            raise HTTPException(
+                status_code=503,
+                detail="DB_SSL_CA is required for DB_SSL_MODE=VERIFY_CA or VERIFY_IDENTITY.",
+            )
+        if ca_file:
+            ca_path = Path(ca_file)
+            if not ca_path.is_absolute():
+                ca_path = ROOT / ca_path
+            if not ca_path.is_file():
+                raise HTTPException(status_code=503, detail="The configured DB_SSL_CA certificate file was not found.")
+            ssl_settings["ca"] = str(ca_path)
+            ssl_settings["check_hostname"] = ssl_mode == "VERIFY_IDENTITY"
+        settings["ssl"] = ssl_settings
+    return settings
+
+
+@contextmanager
+def db_connection():
+    try:
+        connection = pymysql.connect(**database_settings())
+    except HTTPException:
+        raise
+    except pymysql.MySQLError as error:
+        raise HTTPException(status_code=503, detail="Could not connect to MySQL.") from error
+    try:
+        yield connection
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+
+
+def ensure_schema(connection: Any) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS students (
+              student_id VARCHAR(191) PRIMARY KEY,
+              name VARCHAR(255) NOT NULL,
+              email VARCHAR(255) NOT NULL DEFAULT '',
+              descriptor_json LONGTEXT NOT NULL,
+              photo MEDIUMTEXT NOT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+            ) CHARACTER SET utf8mb4
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS attendance_records (
+              id VARCHAR(64) PRIMARY KEY,
+              student_id VARCHAR(191) NOT NULL,
+              student_name VARCHAR(255) NOT NULL,
+              attendance_date DATE NOT NULL,
+              section VARCHAR(191) NOT NULL,
+              attendance_time VARCHAR(32) NOT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE KEY one_checkin_per_class_day (student_id, attendance_date, section),
+              KEY attendance_by_date (attendance_date, section)
+            ) CHARACTER SET utf8mb4
+        """)
+
+
+@app.get("/attendance")
+def get_attendance() -> dict[str, list[dict[str, Any]]]:
+    with db_connection() as connection:
+        ensure_schema(connection)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT student_id, name, email, descriptor_json, photo FROM students ORDER BY name")
+            students = [
+                {"studentId": row["student_id"], "name": row["name"], "email": row["email"],
+                 "descriptor": json.loads(row["descriptor_json"]), "photo": row["photo"]}
+                for row in cursor.fetchall()
+            ]
+            cursor.execute("""SELECT id, student_id, student_name, DATE_FORMAT(attendance_date, '%Y-%m-%d') AS date,
+                              section, attendance_time FROM attendance_records
+                              ORDER BY attendance_date DESC, created_at DESC""")
+            records = [
+                {"id": row["id"], "studentId": row["student_id"], "name": row["student_name"],
+                 "date": row["date"], "section": row["section"], "time": row["attendance_time"]}
+                for row in cursor.fetchall()
+            ]
+    return {"students": students, "records": records}
+
+
+@app.put("/attendance")
+def replace_attendance(store: AttendanceStore) -> dict[str, int]:
+    """Atomically persist the browser store; all SQL values are parameterized."""
+    with db_connection() as connection:
+        ensure_schema(connection)
+        with connection.cursor() as cursor:
+            cursor.execute("DELETE FROM attendance_records")
+            cursor.execute("DELETE FROM students")
+            if store.students:
+                cursor.executemany(
+                    "INSERT INTO students (student_id, name, email, descriptor_json, photo) VALUES (%s, %s, %s, %s, %s)",
+                    [(s.studentId, s.name, s.email, json.dumps(s.descriptor), s.photo) for s in store.students],
+                )
+            if store.records:
+                cursor.executemany(
+                    """INSERT INTO attendance_records
+                    (id, student_id, student_name, attendance_date, section, attendance_time)
+                    VALUES (%s, %s, %s, %s, %s, %s)""",
+                    [(r.id, r.studentId, r.name, r.date, r.section, r.time) for r in store.records],
+                )
+    return {"students": len(store.students), "records": len(store.records)}
 
 
 @app.get("/health")

@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: faceattend-liveness
+    runtime: docker
+    rootDir: liveness-server
+    healthCheckPath: /health
+    envVars:
+      - key: DB_HOST
+        value: mysql-17d8f649-huwaiiboyjustboy-b83e.d.aivencloud.com
+      - key: DB_PORT
+        value: "28270"
+      - key: DB_DATABASE
+        value: LewisSee
+      - key: DB_USERNAME
+        value: avnadmin
+      - key: DB_SSL_MODE
+        value: REQUIRED
+      - key: DB_PASSWORD
+        sync: false
