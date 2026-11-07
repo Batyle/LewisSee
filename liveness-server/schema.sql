@@ -4,6 +4,14 @@
 
 USE `LewisSee`;
 
+CREATE TABLE IF NOT EXISTS class_groups (
+  course VARCHAR(64) NOT NULL,
+  year_level TINYINT UNSIGNED NOT NULL,
+  block VARCHAR(12) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (course, year_level, block)
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS students (
   student_id VARCHAR(191) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,

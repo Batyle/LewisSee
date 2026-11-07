@@ -74,9 +74,16 @@ class AttendanceRecord(BaseModel):
     time: str = Field(min_length=1, max_length=32)
 
 
+class ClassGroup(BaseModel):
+    course: str = Field(min_length=2, max_length=64)
+    yearLevel: int = Field(ge=1, le=8)
+    block: str = Field(min_length=1, max_length=12)
+
+
 class AttendanceStore(BaseModel):
     students: list[Student]
     records: list[AttendanceRecord]
+    classes: list[ClassGroup] = Field(default_factory=list)
 
 
 def database_settings() -> dict[str, Any]:
@@ -144,6 +151,15 @@ def db_connection():
 def ensure_schema(connection: Any) -> None:
     with connection.cursor() as cursor:
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS class_groups (
+              course VARCHAR(64) NOT NULL,
+              year_level TINYINT UNSIGNED NOT NULL,
+              block VARCHAR(12) NOT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              PRIMARY KEY (course, year_level, block)
+            ) CHARACTER SET utf8mb4
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS students (
               student_id VARCHAR(191) PRIMARY KEY,
               name VARCHAR(255) NOT NULL,
@@ -205,12 +221,27 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                  "date": row["date"], "section": row["section"], "time": row["attendance_time"]}
                 for row in cursor.fetchall()
             ]
-    return {"students": students, "records": records}
+            cursor.execute("SELECT course, year_level, block FROM class_groups ORDER BY course, year_level, block")
+            classes = [
+                {"course": row["course"], "yearLevel": row["year_level"], "block": row["block"]}
+                for row in cursor.fetchall()
+            ]
+    return {"students": students, "records": records, "classes": classes}
 
 
 @app.put("/attendance")
 def replace_attendance(store: AttendanceStore) -> dict[str, int]:
     """Atomically persist the browser store; all SQL values are parameterized."""
+    # Older browser builds did not send classes. Derive them during the
+    # transition so upgrading the live API does not reject saved rosters.
+    if not store.classes:
+        seen_classes: set[tuple[str, int, str]] = set()
+        store.classes = []
+        for student in store.students:
+            key = (student.course.strip().casefold(), student.yearLevel, student.block.strip().casefold())
+            if key not in seen_classes:
+                seen_classes.add(key)
+                store.classes.append(ClassGroup(course=student.course, yearLevel=student.yearLevel, block=student.block))
     student_ids: set[str] = set()
     student_names: set[str] = set()
     student_emails: set[str] = set()
@@ -232,11 +263,23 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
             student_emails.add(email)
     if any(record.studentId.casefold() not in student_ids for record in store.records):
         raise HTTPException(status_code=422, detail="Attendance records must belong to an enrolled student.")
+    class_keys = {(item.course.strip().casefold(), item.yearLevel, item.block.strip().casefold()) for item in store.classes}
+    if len(class_keys) != len(store.classes):
+        raise HTTPException(status_code=422, detail="Duplicate classes are not allowed.")
+    student_classes = {(item.course.strip().casefold(), item.yearLevel, item.block.strip().casefold()) for item in store.students}
+    if not student_classes.issubset(class_keys):
+        raise HTTPException(status_code=422, detail="Every student must be assigned to an existing class.")
     with db_connection() as connection:
         ensure_schema(connection)
         with connection.cursor() as cursor:
             cursor.execute("DELETE FROM attendance_records")
             cursor.execute("DELETE FROM students")
+            cursor.execute("DELETE FROM class_groups")
+            if store.classes:
+                cursor.executemany(
+                    "INSERT INTO class_groups (course, year_level, block) VALUES (%s, %s, %s)",
+                    [(item.course.strip(), item.yearLevel, item.block.strip().upper()) for item in store.classes],
+                )
             if store.students:
                 cursor.executemany(
                     """INSERT INTO students

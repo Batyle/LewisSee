@@ -36,9 +36,11 @@ const TIMEOUT = 20000,
   MATCH_DISTANCE_THRESHOLD = 0.58;
 // Temporary local access for demos. Set to false when Firebase staff accounts are ready.
 const TEST_STAFF_ACCESS = true;
-const COURSE_OPTIONS = ["BSIT", "BSCS", "BSBA", "BSED", "BEED"];
-const YEAR_OPTIONS = ["1", "2", "3", "4"];
-const BLOCK_OPTIONS = ["A", "B", "C", "D"];
+const DEFAULT_CLASSES = [
+  { course: "BSIT", yearLevel: 3, block: "A" },
+  { course: "BSIT", yearLevel: 3, block: "B" },
+  { course: "BSCS", yearLevel: 2, block: "A" },
+];
 const today = () => new Date().toISOString().slice(0, 10);
 const normalize = (value) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
 const classLabel = ({ course, yearLevel, block }) =>
@@ -250,7 +252,8 @@ export default function App() {
     [elapsed, setElapsed] = useState(0),
     [ready, setReady] = useState(false);
   const [students, setStudents] = useState(() => read("attendance-students")),
-    [records, setRecords] = useState(() => read("attendance-records"));
+    [records, setRecords] = useState(() => read("attendance-records")),
+    [classes, setClasses] = useState(() => read("attendance-classes"));
   const [date, setDate] = useState(today),
     [course, setCourse] = useState("BSIT"),
     [yearLevel, setYearLevel] = useState("3"),
@@ -261,9 +264,13 @@ export default function App() {
   const [form, setForm] = useState({ name: "", studentId: "", email: "", course: "BSIT", yearLevel: "3", block: "A" }),
     [file, setFile] = useState(null),
     [notice, setNotice] = useState(""),
+    [page, setPage] = useState("scan"),
+    [newClass, setNewClass] = useState({ course: "", yearLevel: "1", block: "A" }),
+    [historyDraft, setHistoryDraft] = useState({ studentId: "", date: today(), time: "", section: "" }),
     [enrolling, setEnrolling] = useState(false),
     [isEnrollmentOpen, setEnrollmentOpen] = useState(false);
   const [editingId, setEditingId] = useState(null),
+    [historyEditingId, setHistoryEditingId] = useState(null),
     [editForm, setEditForm] = useState({ name: "", studentId: "", email: "", course: "BSIT", yearLevel: "3", block: "A" }),
     [editFile, setEditFile] = useState(null),
     [savingEdit, setSavingEdit] = useState(false);
@@ -284,6 +291,14 @@ export default function App() {
     [cloudLoaded, setCloudLoaded] = useState(false);
   const debugMode = new URLSearchParams(location.search).get("debug") === "1";
   const section = classLabel({ course, yearLevel, block });
+  const activeClasses = classes.length ? classes : DEFAULT_CLASSES;
+  const courses = [...new Set(activeClasses.map((item) => item.course))];
+  const yearsForCourse = [...new Set(activeClasses.filter((item) => item.course === course).map((item) => String(item.yearLevel)))];
+  const blocksForClass = [...new Set(activeClasses.filter((item) => item.course === course && String(item.yearLevel) === String(yearLevel)).map((item) => item.block))];
+  const chooseClass = (value, change) => {
+    const [nextCourse, nextYear, nextBlock] = value.split("|");
+    change({ course: nextCourse, yearLevel: nextYear, block: nextBlock });
+  };
 
   useEffect(() => {
     store("attendance-students", students);
@@ -297,6 +312,9 @@ export default function App() {
   useEffect(() => {
     store("attendance-records", records);
   }, [records]);
+  useEffect(() => {
+    store("attendance-classes", classes);
+  }, [classes]);
   useEffect(() => {
     if (TEST_STAFF_ACCESS || !auth) return undefined;
     return onAuthStateChanged(auth, (user) => {
@@ -315,14 +333,16 @@ export default function App() {
         const next = {
           students: Array.isArray(value.students) ? value.students : [],
           records: Array.isArray(value.records) ? value.records : [],
+          classes: Array.isArray(value.classes) && value.classes.length ? value.classes : DEFAULT_CLASSES,
         };
         // On a new database, keep local records long enough to migrate them once.
         const initial = next.students.length || next.records.length
           ? next
-          : { students: read("attendance-students"), records: read("attendance-records") };
+          : { students: read("attendance-students"), records: read("attendance-records"), classes: read("attendance-classes") };
         lastCloudValue.current = JSON.stringify(next);
         setStudents(initial.students);
         setRecords(initial.records);
+        setClasses(initial.classes?.length ? initial.classes : DEFAULT_CLASSES);
         setCloudLoaded(true);
       })
       .catch((cause) => !cancelled && setAccessError(cause.message || "Could not load the MySQL attendance store."));
@@ -330,14 +350,14 @@ export default function App() {
   }, [access]);
   useEffect(() => {
     if (!cloudLoaded || access !== "granted") return;
-    const next = { students, records },
+    const next = { students, records, classes: activeClasses },
       serialized = JSON.stringify(next);
     if (serialized === lastCloudValue.current) return;
     lastCloudValue.current = serialized;
     saveAttendanceStore(next).catch((cause) =>
       setAccessError(cause.message || "Could not save changes to the MySQL attendance store."),
     );
-  }, [access, cloudLoaded, records, students]);
+  }, [access, activeClasses, cloudLoaded, records, students]);
   useEffect(() => {
     applyTheme(theme);
     return watchSystemTheme(theme, () => applyTheme("system"));
@@ -768,6 +788,74 @@ export default function App() {
     setRecords((all) => all.filter((record) => record.studentId !== student.studentId));
     setNotice(`${student.name} was deleted.`);
   };
+  const addClass = (event) => {
+    event.preventDefault();
+    const next = {
+      course: newClass.course.trim().toUpperCase(),
+      yearLevel: String(newClass.yearLevel).trim(),
+      block: newClass.block.trim().toUpperCase(),
+    };
+    if (!next.course || !next.yearLevel || !next.block)
+      return setNotice("Course, year level, and block are required.");
+    if (!/^\d+$/.test(next.yearLevel) || Number(next.yearLevel) < 1 || Number(next.yearLevel) > 8)
+      return setNotice("Year level must be a number from 1 to 8.");
+    if (activeClasses.some((item) => classLabel(item).toLowerCase() === classLabel(next).toLowerCase()))
+      return setNotice("That class already exists.");
+    setClasses([...activeClasses, next]);
+    setNewClass({ course: "", yearLevel: "1", block: "A" });
+    setNotice(`${classLabel(next)} was added.`);
+  };
+  const deleteClass = (item) => {
+    const assigned = students.filter((student) => belongsToClass(student, item.course, item.yearLevel, item.block));
+    if (assigned.length)
+      return setNotice(`Move or delete the ${assigned.length} student(s) assigned to ${classLabel(item)} before deleting it.`);
+    if (!window.confirm(`Delete ${classLabel(item)}?`)) return;
+    const remaining = activeClasses.filter((candidate) => classLabel(candidate) !== classLabel(item));
+    setClasses(remaining);
+    if (classLabel({ course, yearLevel, block }) === classLabel(item)) {
+      const fallback = remaining[0];
+      if (fallback) {
+        setCourse(fallback.course);
+        setYearLevel(String(fallback.yearLevel));
+        setBlock(fallback.block);
+      }
+    }
+    setNotice(`${classLabel(item)} was deleted.`);
+  };
+  const saveHistoryRecord = (event) => {
+    event.preventDefault();
+    const student = students.find((item) => item.studentId === historyDraft.studentId);
+    const next = {
+      studentId: historyDraft.studentId,
+      name: student?.name || "",
+      date: historyDraft.date,
+      time: historyDraft.time.trim(),
+      section: historyDraft.section.trim(),
+    };
+    if (!next.studentId || !next.date || !next.time || !next.section)
+      return setNotice("Choose a student, date, time, and section.");
+    if (records.some((item) => item.studentId === next.studentId && item.date === next.date && item.section === next.section && item.id !== historyEditingId))
+      return setNotice("This student already has attendance for that class and date.");
+    if (historyEditingId) {
+      setRecords((all) => all.map((item) => item.id === historyEditingId ? { ...item, ...next } : item));
+      setNotice("Attendance record updated.");
+    } else {
+      setRecords((all) => [...all, { id: crypto.randomUUID(), ...next }]);
+      setNotice("Attendance record added.");
+    }
+    setHistoryEditingId(null);
+    setHistoryDraft({ studentId: "", date: today(), time: "", section: section });
+  };
+  const editHistoryRecord = (record) => {
+    setHistoryEditingId(record.id);
+    setHistoryDraft({ studentId: record.studentId, date: record.date, time: record.time, section: record.section });
+    setNotice("");
+  };
+  const deleteHistoryRecord = (record) => {
+    if (!window.confirm(`Delete the attendance record for ${record.name}?`)) return;
+    setRecords((all) => all.filter((item) => item.id !== record.id));
+    setNotice("Attendance record deleted.");
+  };
   const attendance = useMemo(
     () => records.filter((r) => r.date === date && r.section === section),
     [date, records, section],
@@ -860,6 +948,25 @@ export default function App() {
           </select>
         </div>
       </header>
+      <nav className="workspace-nav" aria-label="Attendance workspace">
+        {[
+          ["scan", "Scanner"],
+          ["students", "Students"],
+          ["history", "History"],
+          ["classes", "Classes"],
+        ].map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            className={page === key ? "active" : ""}
+            aria-current={page === key ? "page" : undefined}
+            onClick={() => { setPage(key); setNotice(""); }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
+      {page === "scan" && <>
       <section className="page-heading">
         <div>
           <p className="eyebrow">LIVE CLASSROOM CHECK-IN</p>
@@ -883,21 +990,27 @@ export default function App() {
             <select
               disabled={!ready}
               value={course}
-              onChange={(e) => setCourse(e.target.value)}
+              onChange={(e) => {
+                const next = activeClasses.find((item) => item.course === e.target.value);
+                if (next) { setCourse(next.course); setYearLevel(String(next.yearLevel)); setBlock(next.block); }
+              }}
             >
-              {COURSE_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+              {courses.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
           <label>
             Year
-            <select disabled={!ready} value={yearLevel} onChange={(e) => setYearLevel(e.target.value)}>
-              {YEAR_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+            <select disabled={!ready} value={yearLevel} onChange={(e) => {
+              const next = activeClasses.find((item) => item.course === course && String(item.yearLevel) === e.target.value);
+              if (next) { setYearLevel(String(next.yearLevel)); setBlock(next.block); }
+            }}>
+              {yearsForCourse.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
           <label>
             Block
             <select disabled={!ready} value={block} onChange={(e) => setBlock(e.target.value)}>
-              {BLOCK_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+              {blocksForClass.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
         </div>
@@ -974,6 +1087,15 @@ export default function App() {
           </div>
         </article>
       </section>
+      </>}
+      {page === "students" && <>
+      <section className="page-heading page-heading-compact">
+        <div>
+          <p className="eyebrow">STUDENT DIRECTORY</p>
+          <h1>Students</h1>
+          <p className="muted">Enroll and maintain the face-recognition roster.</p>
+        </div>
+      </section>
       <section className="enrollment-section">
         <div className="section-title">
           <div>
@@ -1023,21 +1145,9 @@ export default function App() {
             />
           </label>
           <label>
-            Course
-            <select required disabled={!ready} value={form.course} onChange={(e) => setForm({ ...form, course: e.target.value })}>
-              {COURSE_OPTIONS.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          <label>
-            Year level
-            <select required disabled={!ready} value={form.yearLevel} onChange={(e) => setForm({ ...form, yearLevel: e.target.value })}>
-              {YEAR_OPTIONS.map((item) => <option key={item}>{item}</option>)}
-            </select>
-          </label>
-          <label>
-            Block
-            <select required disabled={!ready} value={form.block} onChange={(e) => setForm({ ...form, block: e.target.value })}>
-              {BLOCK_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+            Class assignment
+            <select required disabled={!ready} value={`${form.course}|${form.yearLevel}|${form.block}`} onChange={(e) => chooseClass(e.target.value, (next) => setForm({ ...form, ...next }))}>
+              {activeClasses.map((item) => <option key={classLabel(item)} value={`${item.course}|${item.yearLevel}|${item.block}`}>{classLabel(item)}</option>)}
             </select>
           </label>
           <label>
@@ -1135,21 +1245,9 @@ export default function App() {
                 />
               </label>
               <label>
-                Course
-                <select required value={editForm.course} onChange={(e) => setEditForm({ ...editForm, course: e.target.value })}>
-                  {COURSE_OPTIONS.map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-              <label>
-                Year level
-                <select required value={editForm.yearLevel} onChange={(e) => setEditForm({ ...editForm, yearLevel: e.target.value })}>
-                  {YEAR_OPTIONS.map((item) => <option key={item}>{item}</option>)}
-                </select>
-              </label>
-              <label>
-                Block
-                <select required value={editForm.block} onChange={(e) => setEditForm({ ...editForm, block: e.target.value })}>
-                  {BLOCK_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+                Class assignment
+                <select required value={`${editForm.course}|${editForm.yearLevel}|${editForm.block}`} onChange={(e) => chooseClass(e.target.value, (next) => setEditForm({ ...editForm, ...next }))}>
+                  {activeClasses.map((item) => <option key={classLabel(item)} value={`${item.course}|${item.yearLevel}|${item.block}`}>{classLabel(item)}</option>)}
                 </select>
               </label>
               <label>
@@ -1171,6 +1269,60 @@ export default function App() {
           </div>
         )}
       </section>
+      </>}
+      {page === "history" && <section className="workspace-page">
+        <div className="page-heading page-heading-compact">
+          <div>
+            <p className="eyebrow">ATTENDANCE LOG</p>
+            <h1>Attendance history</h1>
+            <p className="muted">Add, correct, or remove saved attendance records.</p>
+          </div>
+        </div>
+        <div className="history-layout">
+          <form className="management-card history-form" onSubmit={saveHistoryRecord}>
+            <div className="section-title"><div><p className="eyebrow">{historyEditingId ? "EDIT RECORD" : "NEW RECORD"}</p><h2>{historyEditingId ? "Update attendance" : "Add attendance"}</h2></div></div>
+            <label>Student
+              <select value={historyDraft.studentId} onChange={(event) => setHistoryDraft({ ...historyDraft, studentId: event.target.value })} required>
+                <option value="">Select student</option>
+                {students.map((student) => <option key={student.studentId} value={student.studentId}>{student.name} — {student.studentId}</option>)}
+              </select>
+            </label>
+            <label>Date<input type="date" value={historyDraft.date} onChange={(event) => setHistoryDraft({ ...historyDraft, date: event.target.value })} required /></label>
+            <label>Time<input type="time" value={historyDraft.time} onChange={(event) => setHistoryDraft({ ...historyDraft, time: event.target.value })} required /></label>
+            <label>Class / section
+              <select value={historyDraft.section} onChange={(event) => setHistoryDraft({ ...historyDraft, section: event.target.value })} required>
+                <option value="">Select class</option>
+                {activeClasses.map((item) => <option key={classLabel(item)} value={classLabel(item)}>{classLabel(item)}</option>)}
+              </select>
+            </label>
+            <div className="form-actions"><button>{historyEditingId ? "Save record" : "Add record"}</button>{historyEditingId && <button type="button" className="secondary-button" onClick={() => { setHistoryEditingId(null); setHistoryDraft({ studentId: "", date: today(), time: "", section }); }}>Cancel</button>}</div>
+          </form>
+          <section className="management-card history-table-card">
+            <div className="section-title"><div><p className="eyebrow">SAVED RECORDS</p><h2>{records.length} attendance entries</h2></div></div>
+            <div className="history-table-wrap"><table><thead><tr><th>Student</th><th>Date</th><th>Class</th><th>Time</th><th>Actions</th></tr></thead><tbody>
+              {[...records].sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`)).map((record) => <tr key={record.id}><td><b>{record.name}</b><small>{record.studentId}</small></td><td>{record.date}</td><td>{record.section}</td><td>{record.time}</td><td className="row-actions"><button type="button" className="secondary-button" onClick={() => editHistoryRecord(record)}>Edit</button><button type="button" className="danger-button" onClick={() => deleteHistoryRecord(record)}>Delete</button></td></tr>)}
+              {!records.length && <tr><td colSpan="5" className="empty">No attendance records yet.</td></tr>}
+            </tbody></table></div>
+          </section>
+        </div>
+      </section>}
+      {page === "classes" && <section className="workspace-page">
+        <div className="page-heading page-heading-compact"><div><p className="eyebrow">CLASS MANAGEMENT</p><h1>Classes</h1><p className="muted">Create the course, year level, and block combinations used throughout the system.</p></div></div>
+        <div className="history-layout">
+          <form className="management-card history-form" onSubmit={addClass}>
+            <div className="section-title"><div><p className="eyebrow">NEW CLASS</p><h2>Add a block/year</h2></div></div>
+            <label>Course<input placeholder="e.g. BSIT" value={newClass.course} onChange={(event) => setNewClass({ ...newClass, course: event.target.value })} required /></label>
+            <label>Year level<input type="number" min="1" max="8" value={newClass.yearLevel} onChange={(event) => setNewClass({ ...newClass, yearLevel: event.target.value })} required /></label>
+            <label>Block<input placeholder="e.g. A" maxLength="12" value={newClass.block} onChange={(event) => setNewClass({ ...newClass, block: event.target.value })} required /></label>
+            <div className="form-actions"><button>Add class</button></div>
+          </form>
+          <section className="management-card">
+            <div className="section-title"><div><p className="eyebrow">AVAILABLE CLASSES</p><h2>{activeClasses.length} class groups</h2></div></div>
+            <div className="class-list">{activeClasses.map((item) => { const count = students.filter((student) => belongsToClass(student, item.course, item.yearLevel, item.block)).length; return <article className="class-row" key={classLabel(item)}><div><b>{classLabel(item)}</b><small>{count} enrolled student{count === 1 ? "" : "s"}</small></div><button type="button" className="danger-button" onClick={() => deleteClass(item)}>Delete</button></article>; })}</div>
+          </section>
+        </div>
+      </section>}
+      {notice && page !== "students" && <p className="workspace-notice">{notice}</p>}
       {notifications.map((item) => (
         <aside className="notification" key={item.id}>
           {item.message || "New server notification"}
