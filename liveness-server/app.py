@@ -58,6 +58,9 @@ class Student(BaseModel):
     name: str = Field(min_length=1, max_length=255)
     studentId: str = Field(min_length=1, max_length=191)
     email: str = Field(default="", max_length=255)
+    course: str = Field(min_length=2, max_length=64)
+    yearLevel: int = Field(ge=1, le=8)
+    block: str = Field(min_length=1, max_length=12)
     descriptor: list[float] = Field(default_factory=list)
     photo: str = Field(default="")
 
@@ -145,12 +148,28 @@ def ensure_schema(connection: Any) -> None:
               student_id VARCHAR(191) PRIMARY KEY,
               name VARCHAR(255) NOT NULL,
               email VARCHAR(255) NOT NULL DEFAULT '',
+              course VARCHAR(64) NOT NULL,
+              year_level TINYINT UNSIGNED NOT NULL,
+              block VARCHAR(12) NOT NULL,
               descriptor_json LONGTEXT NOT NULL,
               photo MEDIUMTEXT NOT NULL,
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
             ) CHARACTER SET utf8mb4
         """)
+        # Existing deployments created the first version without class fields.
+        # Upgrade them in place so staff do not have to recreate the database.
+        cursor.execute("SHOW COLUMNS FROM students")
+        student_columns = {row["Field"] for row in cursor.fetchall()}
+        if "course" not in student_columns:
+            cursor.execute("ALTER TABLE students ADD COLUMN course VARCHAR(64) NOT NULL DEFAULT 'UNASSIGNED' AFTER email")
+        if "year_level" not in student_columns:
+            cursor.execute("ALTER TABLE students ADD COLUMN year_level TINYINT UNSIGNED NOT NULL DEFAULT 0 AFTER course")
+        if "block" not in student_columns:
+            cursor.execute("ALTER TABLE students ADD COLUMN block VARCHAR(12) NOT NULL DEFAULT 'UNASSIGNED' AFTER year_level")
+        cursor.execute("SHOW INDEX FROM students WHERE Key_name = 'unique_student_name'")
+        if not cursor.fetchone():
+            cursor.execute("CREATE UNIQUE INDEX unique_student_name ON students (name)")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS attendance_records (
               id VARCHAR(64) PRIMARY KEY,
@@ -171,9 +190,10 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
     with db_connection() as connection:
         ensure_schema(connection)
         with connection.cursor() as cursor:
-            cursor.execute("SELECT student_id, name, email, descriptor_json, photo FROM students ORDER BY name")
+            cursor.execute("SELECT student_id, name, email, course, year_level, block, descriptor_json, photo FROM students ORDER BY name")
             students = [
                 {"studentId": row["student_id"], "name": row["name"], "email": row["email"],
+                 "course": row["course"], "yearLevel": row["year_level"], "block": row["block"],
                  "descriptor": json.loads(row["descriptor_json"]), "photo": row["photo"]}
                 for row in cursor.fetchall()
             ]
@@ -191,6 +211,27 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
 @app.put("/attendance")
 def replace_attendance(store: AttendanceStore) -> dict[str, int]:
     """Atomically persist the browser store; all SQL values are parameterized."""
+    student_ids: set[str] = set()
+    student_names: set[str] = set()
+    student_emails: set[str] = set()
+    for student in store.students:
+        student_id = " ".join(student.studentId.split()).casefold()
+        student_name = " ".join(student.name.split()).casefold()
+        email = student.email.strip().casefold()
+        if not student_id or not student_name:
+            raise HTTPException(status_code=422, detail="Every student needs a name and student ID.")
+        if student_id in student_ids:
+            raise HTTPException(status_code=422, detail="Duplicate student IDs are not allowed.")
+        if student_name in student_names:
+            raise HTTPException(status_code=422, detail="Duplicate student names are not allowed.")
+        if email and email in student_emails:
+            raise HTTPException(status_code=422, detail="Duplicate email addresses are not allowed.")
+        student_ids.add(student_id)
+        student_names.add(student_name)
+        if email:
+            student_emails.add(email)
+    if any(record.studentId.casefold() not in student_ids for record in store.records):
+        raise HTTPException(status_code=422, detail="Attendance records must belong to an enrolled student.")
     with db_connection() as connection:
         ensure_schema(connection)
         with connection.cursor() as cursor:
@@ -198,8 +239,11 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
             cursor.execute("DELETE FROM students")
             if store.students:
                 cursor.executemany(
-                    "INSERT INTO students (student_id, name, email, descriptor_json, photo) VALUES (%s, %s, %s, %s, %s)",
-                    [(s.studentId, s.name, s.email, json.dumps(s.descriptor), s.photo) for s in store.students],
+                    """INSERT INTO students
+                    (student_id, name, email, course, year_level, block, descriptor_json, photo)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                    [(s.studentId, s.name, s.email, s.course, s.yearLevel, s.block,
+                      json.dumps(s.descriptor), s.photo) for s in store.students],
                 )
             if store.records:
                 cursor.executemany(

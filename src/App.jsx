@@ -36,7 +36,15 @@ const TIMEOUT = 20000,
   MATCH_DISTANCE_THRESHOLD = 0.58;
 // Temporary local access for demos. Set to false when Firebase staff accounts are ready.
 const TEST_STAFF_ACCESS = true;
+const COURSE_OPTIONS = ["BSIT", "BSCS", "BSBA", "BSED", "BEED"];
+const YEAR_OPTIONS = ["1", "2", "3", "4"];
+const BLOCK_OPTIONS = ["A", "B", "C", "D"];
 const today = () => new Date().toISOString().slice(0, 10);
+const normalize = (value) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+const classLabel = ({ course, yearLevel, block }) =>
+  `${course} ${yearLevel}${block}`;
+const belongsToClass = (student, course, yearLevel, block) =>
+  student.course === course && String(student.yearLevel) === String(yearLevel) && student.block === block;
 const store = (key, value) => localStorage.setItem(key, JSON.stringify(value));
 const read = (key) => {
   try {
@@ -234,7 +242,8 @@ export default function App() {
     lastUi = useRef(0),
     lastSignature = useRef(""),
     socket = useRef(),
-    emailedRecords = useRef(new Set());
+    emailedRecords = useRef(new Set()),
+    selectedClass = useRef({ course: "BSIT", yearLevel: "3", block: "A" });
   const lastCloudValue = useRef("");
   const [stage, setStage] = useState("Requesting camera permission"),
     [error, setError] = useState(""),
@@ -243,17 +252,19 @@ export default function App() {
   const [students, setStudents] = useState(() => read("attendance-students")),
     [records, setRecords] = useState(() => read("attendance-records"));
   const [date, setDate] = useState(today),
-    [section, setSection] = useState("BSIT 3A"),
+    [course, setCourse] = useState("BSIT"),
+    [yearLevel, setYearLevel] = useState("3"),
+    [block, setBlock] = useState("A"),
     [message, setMessage] = useState("Preparing scanner…"),
     [faces, setFaces] = useState(0),
     [match, setMatch] = useState(null);
-  const [form, setForm] = useState({ name: "", studentId: "", email: "" }),
+  const [form, setForm] = useState({ name: "", studentId: "", email: "", course: "BSIT", yearLevel: "3", block: "A" }),
     [file, setFile] = useState(null),
     [notice, setNotice] = useState(""),
     [enrolling, setEnrolling] = useState(false),
     [isEnrollmentOpen, setEnrollmentOpen] = useState(false);
   const [editingId, setEditingId] = useState(null),
-    [editForm, setEditForm] = useState({ name: "", studentId: "", email: "" }),
+    [editForm, setEditForm] = useState({ name: "", studentId: "", email: "", course: "BSIT", yearLevel: "3", block: "A" }),
     [editFile, setEditFile] = useState(null),
     [savingEdit, setSavingEdit] = useState(false);
   const [theme, setTheme] = useState(getTheme),
@@ -272,6 +283,7 @@ export default function App() {
     [staffUser, setStaffUser] = useState(null),
     [cloudLoaded, setCloudLoaded] = useState(false);
   const debugMode = new URLSearchParams(location.search).get("debug") === "1";
+  const section = classLabel({ course, yearLevel, block });
 
   useEffect(() => {
     store("attendance-students", students);
@@ -279,6 +291,9 @@ export default function App() {
       .filter((s) => s.descriptor)
       .map((s) => ({ ...s, vector: new Float32Array(s.descriptor) }));
   }, [students]);
+  useEffect(() => {
+    selectedClass.current = { course, yearLevel, block };
+  }, [block, course, yearLevel]);
   useEffect(() => {
     store("attendance-records", records);
   }, [records]);
@@ -489,13 +504,16 @@ export default function App() {
         const matches = detected.map((face) => {
           let best,
             score = Infinity;
-          roster.current.forEach((student) => {
+          const activeClass = selectedClass.current;
+          roster.current
+            .filter((student) => belongsToClass(student, activeClass.course, activeClass.yearLevel, activeClass.block))
+            .forEach((student) => {
             const value = distance(face.descriptor, student.vector);
             if (value < score) {
               score = value;
               best = student;
             }
-          });
+            });
           return best && score < MATCH_DISTANCE_THRESHOLD
             ? { student: best, score: Math.round((1 - score / 0.7) * 100) }
             : null;
@@ -630,25 +648,31 @@ export default function App() {
       const result = await detect(canvas);
       if (result.length !== 1)
         throw new Error("The portrait must contain exactly one face.");
-      if (
-        students.some(
-          (s) =>
-            s.studentId.toLowerCase() === form.studentId.trim().toLowerCase(),
-        )
-      )
+      const nextId = form.studentId.trim();
+      const nextName = form.name.trim();
+      const nextEmail = form.email.trim();
+      if (!nextName || !nextId) throw new Error("Full name and student ID are required.");
+      if (students.some((s) => normalize(s.studentId) === normalize(nextId)))
         throw new Error("That student ID is already enrolled.");
+      if (students.some((s) => normalize(s.name) === normalize(nextName)))
+        throw new Error("A student with that full name is already enrolled.");
+      if (nextEmail && students.some((s) => s.email && normalize(s.email) === normalize(nextEmail)))
+        throw new Error("That email address is already enrolled.");
       const photo = await toDataUrl(file);
       setStudents((all) => [
         ...all,
         {
           ...form,
-          name: form.name.trim(),
-          studentId: form.studentId.trim(),
+          name: nextName,
+          studentId: nextId,
+          email: nextEmail,
+          yearLevel: String(form.yearLevel),
+          block: form.block.trim().toUpperCase(),
           descriptor: Array.from(result[0].descriptor),
           photo,
         },
       ]);
-      setForm({ name: "", studentId: "", email: "" });
+      setForm({ name: "", studentId: "", email: "", course, yearLevel, block });
       setNotice("Student enrolled.");
       setEnrollmentOpen(false);
     } catch (cause) {
@@ -663,6 +687,9 @@ export default function App() {
       name: student.name,
       studentId: student.studentId,
       email: student.email || "",
+      course: student.course || "BSIT",
+      yearLevel: String(student.yearLevel || "1"),
+      block: student.block || "A",
     });
     setEditFile(null);
     setNotice("");
@@ -673,18 +700,28 @@ export default function App() {
     setSavingEdit(true);
     try {
       const nextId = editForm.studentId.trim();
+      const nextName = editForm.name.trim();
+      const nextEmail = editForm.email.trim();
+      if (!nextName || !nextId) throw new Error("Full name and student ID are required.");
       if (
         students.some(
           (student) =>
-            student.studentId.toLowerCase() === nextId.toLowerCase() &&
+            normalize(student.studentId) === normalize(nextId) &&
             student.studentId !== editingId,
         )
       )
         throw new Error("That student ID is already enrolled.");
+      if (students.some((student) => normalize(student.name) === normalize(nextName) && student.studentId !== editingId))
+        throw new Error("A student with that full name is already enrolled.");
+      if (nextEmail && students.some((student) => student.email && normalize(student.email) === normalize(nextEmail) && student.studentId !== editingId))
+        throw new Error("That email address is already enrolled.");
       let changes = {
-        name: editForm.name.trim(),
+        name: nextName,
         studentId: nextId,
-        email: editForm.email.trim(),
+        email: nextEmail,
+        course: editForm.course,
+        yearLevel: String(editForm.yearLevel),
+        block: editForm.block.trim().toUpperCase(),
       };
       if (editFile) {
         const api = await import("face-api.js"),
@@ -712,6 +749,11 @@ export default function App() {
             : student,
         ),
       );
+      setRecords((all) =>
+        all.map((record) => record.studentId === editingId
+          ? { ...record, studentId: nextId, name: nextName }
+          : record),
+      );
       setEditingId(null);
       setNotice("Student information updated.");
     } catch (cause) {
@@ -720,9 +762,19 @@ export default function App() {
       setSavingEdit(false);
     }
   };
+  const deleteStudent = (student) => {
+    if (!window.confirm(`Delete ${student.name} and their attendance records? This cannot be undone.`)) return;
+    setStudents((all) => all.filter((item) => item.studentId !== student.studentId));
+    setRecords((all) => all.filter((record) => record.studentId !== student.studentId));
+    setNotice(`${student.name} was deleted.`);
+  };
   const attendance = useMemo(
     () => records.filter((r) => r.date === date && r.section === section),
     [date, records, section],
+  );
+  const studentsForClass = useMemo(
+    () => students.filter((student) => belongsToClass(student, course, yearLevel, block)),
+    [block, course, students, yearLevel],
   );
   useEffect(() => {
     if (!TEST_STAFF_ACCESS || access !== "granted") return undefined;
@@ -827,15 +879,25 @@ export default function App() {
             />
           </label>
           <label>
-            Class
+            Course
             <select
               disabled={!ready}
-              value={section}
-              onChange={(e) => setSection(e.target.value)}
+              value={course}
+              onChange={(e) => setCourse(e.target.value)}
             >
-              <option>BSIT 3A</option>
-              <option>BSIT 3B</option>
-              <option>BSCS 2A</option>
+              {COURSE_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            Year
+            <select disabled={!ready} value={yearLevel} onChange={(e) => setYearLevel(e.target.value)}>
+              {YEAR_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            Block
+            <select disabled={!ready} value={block} onChange={(e) => setBlock(e.target.value)}>
+              {BLOCK_OPTIONS.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
         </div>
@@ -875,7 +937,7 @@ export default function App() {
               <b>{faces}</b> faces in frame
             </span>
             <span>
-              <b>{students.length}</b> enrolled
+              <b>{studentsForClass.length}</b> enrolled in {section}
             </span>
           </div>
           {debugMode && (
@@ -961,6 +1023,24 @@ export default function App() {
             />
           </label>
           <label>
+            Course
+            <select required disabled={!ready} value={form.course} onChange={(e) => setForm({ ...form, course: e.target.value })}>
+              {COURSE_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            Year level
+            <select required disabled={!ready} value={form.yearLevel} onChange={(e) => setForm({ ...form, yearLevel: e.target.value })}>
+              {YEAR_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            Block
+            <select required disabled={!ready} value={form.block} onChange={(e) => setForm({ ...form, block: e.target.value })}>
+              {BLOCK_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
             Reference portrait
             <input
               required
@@ -982,7 +1062,7 @@ export default function App() {
         )}
         {notice && <p className="enroll-message">{notice}</p>}
         <div className="directory-list">
-          {students.map((student) => (
+          {studentsForClass.map((student) => (
             <div className="student-row" key={student.studentId}>
               <span className="directory-photo">
                 {student.photo ? (
@@ -994,12 +1074,20 @@ export default function App() {
               <span>
                 <b>{student.name}</b>
                 <small>{student.studentId}</small>
+                <small>{classLabel(student)}</small>
               </span>
               <button
                 className="edit-student"
                 onClick={() => beginEdit(student)}
               >
                 Edit
+              </button>
+              <button
+                className="delete-student"
+                type="button"
+                onClick={() => deleteStudent(student)}
+              >
+                Delete
               </button>
             </div>
           ))}
@@ -1045,6 +1133,24 @@ export default function App() {
                     setEditForm({ ...editForm, email: e.target.value })
                   }
                 />
+              </label>
+              <label>
+                Course
+                <select required value={editForm.course} onChange={(e) => setEditForm({ ...editForm, course: e.target.value })}>
+                  {COURSE_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+              <label>
+                Year level
+                <select required value={editForm.yearLevel} onChange={(e) => setEditForm({ ...editForm, yearLevel: e.target.value })}>
+                  {YEAR_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+                </select>
+              </label>
+              <label>
+                Block
+                <select required value={editForm.block} onChange={(e) => setEditForm({ ...editForm, block: e.target.value })}>
+                  {BLOCK_OPTIONS.map((item) => <option key={item}>{item}</option>)}
+                </select>
               </label>
               <label>
                 Replace portrait (optional)
