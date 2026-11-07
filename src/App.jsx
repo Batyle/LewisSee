@@ -267,6 +267,9 @@ export default function App() {
     [page, setPage] = useState("scan"),
     [newClass, setNewClass] = useState({ course: "", yearLevel: "1", block: "A" }),
     [historyDraft, setHistoryDraft] = useState({ studentId: "", date: today(), time: "", section: "" }),
+    [historySearch, setHistorySearch] = useState(""),
+    [historySectionFilter, setHistorySectionFilter] = useState(""),
+    [historySort, setHistorySort] = useState("newest"),
     [enrolling, setEnrolling] = useState(false),
     [isEnrollmentOpen, setEnrollmentOpen] = useState(false);
   const [editingId, setEditingId] = useState(null),
@@ -856,6 +859,30 @@ export default function App() {
     setRecords((all) => all.filter((item) => item.id !== record.id));
     setNotice("Attendance record deleted.");
   };
+  const deleteAllHistory = () => {
+    if (!records.length) return;
+    if (!window.confirm(`Delete all ${records.length} attendance record(s)? This cannot be undone.`)) return;
+    setRecords([]);
+    setHistoryEditingId(null);
+    setNotice("All attendance records were deleted. Student and class data were kept.");
+  };
+  const historySections = useMemo(
+    () => [...new Set(records.map((record) => record.section).filter(Boolean))].sort(),
+    [records],
+  );
+  const displayedHistory = useMemo(() => {
+    const query = historySearch.trim().toLowerCase();
+    const next = records.filter((record) =>
+      (!query || `${record.name} ${record.studentId} ${record.section}`.toLowerCase().includes(query)) &&
+      (!historySectionFilter || record.section === historySectionFilter),
+    );
+    return next.sort((left, right) => {
+      if (historySort === "oldest") return `${left.date}${left.time}`.localeCompare(`${right.date}${right.time}`);
+      if (historySort === "name") return left.name.localeCompare(right.name);
+      if (historySort === "class") return left.section.localeCompare(right.section) || left.name.localeCompare(right.name);
+      return `${right.date}${right.time}`.localeCompare(`${left.date}${left.time}`);
+    });
+  }, [historySearch, historySectionFilter, historySort, records]);
   const attendance = useMemo(
     () => records.filter((r) => r.date === date && r.section === section),
     [date, records, section],
@@ -1298,10 +1325,23 @@ export default function App() {
             <div className="form-actions"><button>{historyEditingId ? "Save record" : "Add record"}</button>{historyEditingId && <button type="button" className="secondary-button" onClick={() => { setHistoryEditingId(null); setHistoryDraft({ studentId: "", date: today(), time: "", section }); }}>Cancel</button>}</div>
           </form>
           <section className="management-card history-table-card">
-            <div className="section-title"><div><p className="eyebrow">SAVED RECORDS</p><h2>{records.length} attendance entries</h2></div></div>
+            <div className="section-title"><div><p className="eyebrow">SAVED RECORDS</p><h2>{displayedHistory.length} of {records.length} attendance entries</h2></div><button type="button" className="danger-button" disabled={!records.length} onClick={deleteAllHistory}>Delete all</button></div>
+            <div className="history-controls">
+              <label>Search
+                <input type="search" placeholder="Name, ID, or class" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} />
+              </label>
+              <label>Class
+                <select value={historySectionFilter} onChange={(event) => setHistorySectionFilter(event.target.value)}><option value="">All classes</option>{historySections.map((item) => <option key={item} value={item}>{item}</option>)}</select>
+              </label>
+              <label>Sort by
+                <select value={historySort} onChange={(event) => setHistorySort(event.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="name">Student name</option><option value="class">Class / section</option></select>
+              </label>
+              {(historySearch || historySectionFilter || historySort !== "newest") && <button type="button" className="secondary-button clear-history-filters" onClick={() => { setHistorySearch(""); setHistorySectionFilter(""); setHistorySort("newest"); }}>Clear filters</button>}
+            </div>
             <div className="history-table-wrap"><table><thead><tr><th>Student</th><th>Date</th><th>Class</th><th>Time</th><th>Actions</th></tr></thead><tbody>
-              {[...records].sort((a, b) => `${b.date}${b.time}`.localeCompare(`${a.date}${a.time}`)).map((record) => <tr key={record.id}><td><b>{record.name}</b><small>{record.studentId}</small></td><td>{record.date}</td><td>{record.section}</td><td>{record.time}</td><td className="row-actions"><button type="button" className="secondary-button" onClick={() => editHistoryRecord(record)}>Edit</button><button type="button" className="danger-button" onClick={() => deleteHistoryRecord(record)}>Delete</button></td></tr>)}
+              {displayedHistory.map((record) => <tr key={record.id}><td><b>{record.name}</b><small>{record.studentId}</small></td><td>{record.date}</td><td>{record.section}</td><td>{record.time}</td><td className="row-actions"><button type="button" className="secondary-button" onClick={() => editHistoryRecord(record)}>Edit</button><button type="button" className="danger-button" onClick={() => deleteHistoryRecord(record)}>Delete</button></td></tr>)}
               {!records.length && <tr><td colSpan="5" className="empty">No attendance records yet.</td></tr>}
+              {!!records.length && !displayedHistory.length && <tr><td colSpan="5" className="empty">No records match your search or class filter.</td></tr>}
             </tbody></table></div>
           </section>
         </div>
