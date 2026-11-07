@@ -659,6 +659,9 @@ export default function App() {
     if (!file) return setNotice("Choose a reference portrait.");
     setEnrolling(true);
     try {
+      // Enrollment uses an uploaded portrait, so it must not be blocked when
+      // the webcam is loading, unavailable, or permission was denied.
+      await loadDetector();
       const api = await import("face-api.js"),
         image = await api.bufferToImage(file),
         canvas = createInferenceCanvas(INFERENCE_WIDTH, INFERENCE_HEIGHT);
@@ -1148,7 +1151,6 @@ export default function App() {
             Full name
             <input
               required
-              disabled={!ready}
               value={form.name}
               onChange={(e) => setForm({ ...form, name: e.target.value })}
             />
@@ -1157,7 +1159,6 @@ export default function App() {
             Student ID
             <input
               required
-              disabled={!ready}
               value={form.studentId}
               onChange={(e) => setForm({ ...form, studentId: e.target.value })}
             />
@@ -1166,14 +1167,13 @@ export default function App() {
             Email
             <input
               type="email"
-              disabled={!ready}
               value={form.email}
               onChange={(e) => setForm({ ...form, email: e.target.value })}
             />
           </label>
           <label>
             Class assignment
-            <select required disabled={!ready} value={`${form.course}|${form.yearLevel}|${form.block}`} onChange={(e) => chooseClass(e.target.value, (next) => setForm({ ...form, ...next }))}>
+            <select required value={`${form.course}|${form.yearLevel}|${form.block}`} onChange={(e) => chooseClass(e.target.value, (next) => setForm({ ...form, ...next }))}>
               {activeClasses.map((item) => <option key={classLabel(item)} value={`${item.course}|${item.yearLevel}|${item.block}`}>{classLabel(item)}</option>)}
             </select>
           </label>
@@ -1181,7 +1181,6 @@ export default function App() {
             Reference portrait
             <input
               required
-              disabled={!ready}
               type="file"
               accept="image/*"
               onChange={(e) => setFile(e.target.files?.[0])}
@@ -1190,7 +1189,7 @@ export default function App() {
               </div>
               <footer className="student-modal-actions">
                 <button className="modal-cancel" type="button" disabled={enrolling} onClick={() => setEnrollmentOpen(false)}>Cancel</button>
-          <button className="enroll-button" disabled={!ready || enrolling}>
+          <button className="enroll-button" disabled={enrolling}>
             {enrolling ? "Verifying…" : "Enroll student"}
           </button>
               </footer>
