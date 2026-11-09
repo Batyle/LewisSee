@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import emailjs from "@emailjs/browser";
 import {
   createUserWithEmailAndPassword,
   onAuthStateChanged,
@@ -88,32 +89,33 @@ const verifyLiveness = async (canvas) => {
   return response.json();
 };
 const sendAttendanceEmail = async (student, record) => {
-  const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID,
-    templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID,
-    publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY;
-  if (!student.email || !serviceId || !templateId || !publicKey) return false;
-  const response = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      service_id: serviceId,
-      template_id: templateId,
-      user_id: publicKey,
-      template_params: {
-        to_email: student.email,
-        to_name: student.name,
-        student_name: student.name,
-        student_id: student.studentId,
-        class_name: record.section,
-        attendance_date: record.date,
-        attendance_time: record.time,
-        message: "Your attendance has been recorded.",
-      },
-    }),
+  const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID?.trim();
+  const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID?.trim();
+  const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY?.trim();
+  const recipient = student.email?.trim();
+
+  if (!recipient) throw new Error("This student does not have an email address.");
+  if (!serviceId || !templateId || !publicKey)
+    throw new Error("EmailJS is not configured for this deployment.");
+
+  await emailjs.send(serviceId, templateId, {
+    to_email: recipient,
+    to_name: student.name,
+    student_name: student.name,
+    student_id: student.studentId,
+    class_name: record.section,
+    attendance_date: record.date,
+    attendance_time: record.time,
+    message: "Your attendance has been recorded.",
+  }, {
+    publicKey,
   });
-  if (!response.ok)
-    throw new Error(`Email service returned ${response.status}.`);
   return true;
+};
+
+const emailErrorMessage = (error) => {
+  const detail = typeof error?.text === "string" ? error.text : error?.message;
+  return detail ? `Email could not be sent: ${detail}` : "Email could not be sent.";
 };
 
 const Loader = memo(({ stage, error, elapsed, retry }) => (
@@ -504,12 +506,12 @@ export default function App() {
                   ].slice(0, 4),
                 );
             })
-            .catch(() =>
+            .catch((error) =>
               setNotifications((items) =>
                 [
                   {
                     id: `email-error-${record.id}`,
-                    message: `Attendance saved, but email to ${student.name} could not be sent.`,
+                    message: `Attendance saved for ${student.name}. ${emailErrorMessage(error)}`,
                   },
                   ...items,
                 ].slice(0, 4),

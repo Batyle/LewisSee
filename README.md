@@ -100,11 +100,13 @@ Set `LIVENESS_CORS_ORIGINS=https://YOUR-GITHUB-USER.github.io` on the liveness h
 
 ## EmailJS setup
 
-The local EmailJS settings are stored in `.env.local`; it is ignored by Git. Copy `.env.example` when setting up another machine, then provide its public key.
+The local EmailJS settings are stored in `.env.local`; it is ignored by Git. Copy `.env.example` when setting up another machine, then provide its public key. The deployed GitHub Pages build uses repository **Actions variables** with those same `VITE_EMAILJS_*` names.
 
 In EmailJS, set the template's recipient field to `{{to_email}}`. The app supplies `to_email`, `to_name`, `student_name`, `student_id`, `class_name`, `attendance_date`, `attendance_time`, and `message`.
 
 For example, the email body can contain: `Hello {{student_name}}, {{message}}`
+
+In EmailJS **Account → Security**, allow the local development origin and the GitHub Pages origin (for example, `http://localhost:5173` and `https://batyle.github.io`). A blocked origin is rejected by EmailJS before it can deliver the message.
 
 Restart the Vite development server after changing any `VITE_` setting.
 
