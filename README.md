@@ -106,7 +106,7 @@ In EmailJS, set the template's recipient field to `{{to_email}}`. The app suppli
 
 For example, the email body can contain: `Hello {{student_name}}, {{message}}`
 
-In EmailJS **Account → Security**, allow the local development origin and the GitHub Pages origin (for example, `http://localhost:5173` and `https://batyle.github.io`). A blocked origin is rejected by EmailJS before it can deliver the message.
+EmailJS domain allowlisting is an optional paid-plan security feature. It is not needed for EmailJS's free plan; if you later enable it, allow the local development origin and the GitHub Pages origin (for example, `http://localhost:5173` and `https://batyle.github.io`).
 
 Restart the Vite development server after changing any `VITE_` setting.
 
