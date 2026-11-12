@@ -1,17 +1,9 @@
-const tokenKey = "admin-session-token";
-const testToken = "local-test-admin";
-const testAdmin = { id: 0, name: "Administrator", email: "admin", role: "admin" };
+import { getAdminApiUrl } from "./apiRoot";
 
-const endpoint = () => {
-  const configured = import.meta.env.VITE_ADMIN_API_URL?.trim();
-  if (configured) return configured.replace(/\/$/, "");
-  // Live MySQL admin auth is served by the liveness API under /admin.
-  return "http://127.0.0.1:8000/admin";
-};
+const tokenKey = "admin-session-token";
 
 const request = async (path, options = {}) => {
-  const baseUrl = endpoint();
-  if (!baseUrl) throw new Error("Admin API is not configured for this deployment.");
+  const baseUrl = getAdminApiUrl();
   const token = localStorage.getItem(tokenKey);
   let response;
   try {
@@ -25,7 +17,7 @@ const request = async (path, options = {}) => {
     });
   } catch {
     throw new Error(
-      "Failed to reach the MySQL admin API. Start liveness-server (port 8000) and confirm VITE_ADMIN_API_URL.",
+      "Failed to reach the MySQL admin API. Start liveness-server (port 8000) and configure VITE_ADMIN_API_URL or VITE_LIVENESS_API_URL.",
     );
   }
   const body = await response.json().catch(() => ({}));
@@ -34,17 +26,28 @@ const request = async (path, options = {}) => {
 };
 
 export async function signInAdmin(email, password) {
-  if (email === "admin" && password === "admin123") {
-    localStorage.setItem(tokenKey, testToken);
-    return testAdmin;
-  }
-  const response = await request("/login", { method: "POST", body: JSON.stringify({ email, password }) });
+  const normalizedEmail = email.trim();
+  const loginEmail = normalizedEmail.toLowerCase() === "admin"
+    ? "admin@lewissee.local"
+    : normalizedEmail;
+  const response = await request("/login", {
+    method: "POST",
+    body: JSON.stringify({ email: loginEmail, password }),
+  });
   localStorage.setItem(tokenKey, response.token);
   return response.admin;
 }
 
-export const getCurrentAdmin = () => localStorage.getItem(tokenKey) === testToken
-  ? Promise.resolve(testAdmin)
-  : request("/me").then((response) => response.admin || response);
+export const getCurrentAdmin = () => request("/me").then((response) => response.admin || response);
 export const clearAdminSession = () => localStorage.removeItem(tokenKey);
 export const hasAdminSession = () => Boolean(localStorage.getItem(tokenKey));
+export const listInstructors = () => request("/instructors");
+export const approveInstructor = (uid) =>
+  request(`/instructors/${encodeURIComponent(uid)}/approve`, { method: "POST" });
+export const rejectInstructor = (uid, reason = "") =>
+  request(`/instructors/${encodeURIComponent(uid)}/reject`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+export const suspendInstructor = (uid) =>
+  request(`/instructors/${encodeURIComponent(uid)}/suspend`, { method: "POST" });

@@ -21,6 +21,8 @@ For local system testing, after configuring the Node API database variables, run
 
 Students (including their reference portrait and face descriptor) and dated attendance records are now stored by the Python service in MySQL. The browser uses `GET`/`PUT /attendance`; it never receives the MySQL password. The service creates the `students` and `attendance_records` tables on its first successful connection.
 
+Instructor access requests are stored in the MySQL `instructors` table with `pending` status. After the Python API is running, admins can review, approve, or reject them from **Admin → Instructors**; the page reads the current records from the protected `/admin/instructors` API. When deploying a code update, redeploy or restart the Python API as well as rebuilding the frontend so the review endpoints are available.
+
 To create the tables manually in MySQL Workbench, connect to the Aiven service with `defaultdb` as the default schema, then open and run [liveness-server/schema.sql](liveness-server/schema.sql). It is safe to run more than once and does not delete data.
 
 Run `setup.ps1` again once to install the MySQL driver. To save the values in a Git-ignored local file, run `setup.ps1` with `-ConfigureDatabase`; it prompts for the password without echoing it:
@@ -64,13 +66,15 @@ docker build -t faceattend-liveness .\liveness-server
 docker run --rm -p 8000:8000 -e LIVENESS_CORS_ORIGINS=https://YOUR-PROJECT.vercel.app faceattend-liveness
 ```
 
-Deploy that same image to a Docker-capable host, then add this Vercel **Production** environment variable and redeploy the Vercel project:
+Deploy that same image to a Docker-capable host, then set these Vercel **Production** environment variables and redeploy the Vercel project:
 
 ```text
 VITE_LIVENESS_API_URL=https://YOUR-LIVENESS-HOST/liveness
+VITE_ATTENDANCE_API_URL=https://YOUR-LIVENESS-HOST/attendance
+VITE_ADMIN_API_URL=https://YOUR-LIVENESS-HOST/admin
 ```
 
-For preview deployments, add the variable to the Preview environment too. The container accepts `*.vercel.app` origins by default. If you use a custom Vercel domain, set `LIVENESS_CORS_ORIGINS=https://your-domain.example` on the liveness host. Do not set this variable to `http://127.0.0.1:8000` in Vercel: that address refers to each visitor's own device.
+Set the same variables for Vercel Preview deployments if you test preview builds. The Render service needs `DB_PASSWORD` and an `ADMIN_JWT_SECRET` of at least 32 characters; the database host, port, name, username, and TLS mode are configured by `render.yaml`. The container accepts `*.vercel.app` origins by default. For a custom Vercel domain, add its exact origin to `LIVENESS_CORS_ORIGINS` on the API service. Never set a `VITE_` variable to the MySQL password, and do not point Vercel at `http://127.0.0.1:8000`: that address refers to each visitor's own device.
 
 If the service is offline or the frame is classified as a photo/screen, attendance is not saved. The model reduces presentation attacks but should not be treated as a guarantee against every advanced replay or deepfake attack.
 
@@ -86,7 +90,7 @@ If the service is offline or the frame is classified as a photo/screen, attendan
    VITE_ADMIN_API_URL=https://faceattend-liveness.onrender.com/admin
    ```
 
-4. In Render set `LIVENESS_CORS_ORIGINS=https://YOUR-PROJECT.vercel.app` if you want a strict origin allow-list. The supplied container default allows Vercel subdomains. Add the same `VITE_` variables to Vercel Preview if preview deployments should work.
+4. The supplied container default allows Vercel subdomains. Add the same `VITE_` variables to Vercel Preview if preview deployments should work.
 
 `/health` is the Render health check. Opening the Vercel URL and enrolling a student will create the MySQL tables automatically. Aiven's connection details were tested against `LewisSee` with TLS successfully; the password is intentionally not saved in this repository.
 
@@ -97,7 +101,7 @@ The included GitHub Actions workflow deploys the React site on every push to `ma
 GitHub Pages hosts static files only; it cannot run `liveness-server`, Python, or the anti-spoofing model. For a deployed site, host `liveness-server` on a Python-capable HTTPS service and set these GitHub **Actions variables** before deploying:
 
 - `VITE_LIVENESS_API_URL` — the HTTPS endpoint, for example `https://liveness.example.com/liveness`.
-- The `VITE_EMAILJS_*`, `VITE_FIREBASE_*`, and `VITE_ATTENDANCE_API_URL` values from `.env.example` if those services are enabled.
+- The `VITE_EMAILJS_*` and `VITE_FIREBASE_*` values from `.env.example` if those services are enabled.
 
 Set `LIVENESS_CORS_ORIGINS=https://YOUR-GITHUB-USER.github.io` on the liveness host (use a comma-separated list to allow additional origins). A GitHub Pages site is HTTPS, so browsers will block its requests to the local `http://127.0.0.1:8000` service; use an HTTPS liveness endpoint for the public deployment. Local development continues to use the default URL in `.env.example`.
 

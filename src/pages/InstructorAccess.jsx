@@ -2,18 +2,8 @@ import { useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import AccessShell from "../components/AccessShell";
 import { clearAdminSession } from "../api/adminApi";
+import { getInstructorApiUrl } from "../api/apiRoot";
 import { useAuth } from "../context/AuthContext";
-
-/** Prefer the live MySQL API (liveness-server). Express `/api` remains a fallback. */
-const apiRoot = () => {
-  const adminUrl = import.meta.env.VITE_ADMIN_API_URL?.trim();
-  if (adminUrl) return adminUrl.replace(/\/admin\/?$/, "").replace(/\/$/, "");
-  const attendanceUrl = import.meta.env.VITE_ATTENDANCE_API_URL?.trim();
-  if (attendanceUrl) return attendanceUrl.replace(/\/attendance\/?$/, "").replace(/\/$/, "");
-  const expressUrl = import.meta.env.VITE_API_URL?.trim();
-  if (expressUrl) return expressUrl.replace(/\/api\/?$/, "").replace(/\/$/, "");
-  return "http://127.0.0.1:8000";
-};
 
 const apiErrorMessage = (data, fallback) => {
   if (!data || typeof data !== "object") return fallback;
@@ -38,13 +28,13 @@ async function signInInstructor(email, password) {
 
   let response;
   try {
-    response = await fetch(`${apiRoot()}/instructor-auth/login`, {
+    response = await fetch(getInstructorApiUrl("/instructor-auth/login"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email, password }),
     });
   } catch {
-    throw new Error("Failed to reach the instructor API. Start liveness-server (port 8000) and confirm VITE_ADMIN_API_URL.");
+    throw new Error("Failed to reach the instructor API. Start liveness-server (port 8000) and configure VITE_ADMIN_API_URL or VITE_LIVENESS_API_URL.");
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -71,7 +61,7 @@ export default function InstructorAccess() {
   useEffect(() => {
     if (mode !== "register") return;
     let cancelled = false;
-    fetch(`${apiRoot()}/blocks`)
+    fetch(getInstructorApiUrl("/blocks"))
       .then((response) => (response.ok ? response.json() : Promise.reject()))
       .then((data) => {
         if (!cancelled) setBlocks(data.blocks || []);
@@ -111,7 +101,7 @@ export default function InstructorAccess() {
       if (mode === "register") {
         let response;
         try {
-          response = await fetch(`${apiRoot()}/instructor-auth/register`, {
+          response = await fetch(getInstructorApiUrl("/instructor-auth/register"), {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -122,7 +112,7 @@ export default function InstructorAccess() {
             }),
           });
         } catch {
-          throw new Error("Failed to reach the instructor API. Start liveness-server (port 8000) and confirm VITE_ADMIN_API_URL.");
+          throw new Error("Failed to reach the instructor API. Start liveness-server (port 8000) and configure VITE_ADMIN_API_URL or VITE_LIVENESS_API_URL.");
         }
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(apiErrorMessage(data, "Unable to submit your request."));

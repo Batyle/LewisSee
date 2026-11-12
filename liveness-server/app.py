@@ -125,6 +125,10 @@ class InstructorLogin(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class InstructorDecision(BaseModel):
+    reason: str = Field(default="", max_length=500)
+
+
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
@@ -337,6 +341,126 @@ def admin_login(credentials: AdminLogin) -> dict[str, Any]:
 @app.get("/admin/me")
 def get_current_admin(admin: dict[str, str] = Depends(current_admin)) -> dict[str, str]:
     return {"uid": admin["uid"], "email": admin["email"], "role": admin["role"]}
+
+
+def serialize_instructor(row: dict[str, Any]) -> dict[str, Any]:
+    blocks = row.get("assigned_blocks") or []
+    if isinstance(blocks, str):
+        try:
+            blocks = json.loads(blocks)
+        except json.JSONDecodeError:
+            blocks = []
+    created = row.get("created_at")
+    return {
+        "uid": row["uid"],
+        "name": row["name"],
+        "email": row["email"],
+        "status": row["status"],
+        "assignedBlocks": blocks if isinstance(blocks, list) else [],
+        "rejectionReason": row.get("rejection_reason") or "",
+        "createdAt": created.isoformat() if hasattr(created, "isoformat") else created,
+    }
+
+
+def fetch_instructor(connection: Any, uid: str) -> dict[str, Any] | None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            SELECT uid, name, email, status, assigned_blocks, rejection_reason, created_at
+            FROM instructors
+            WHERE uid = %s
+            """,
+            (uid,),
+        )
+        return cursor.fetchone()
+
+
+@app.get("/admin/instructors")
+def list_instructors(_admin: dict[str, str] = Depends(current_admin)) -> dict[str, Any]:
+    with db_connection() as connection:
+        ensure_schema(connection)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT uid, name, email, status, assigned_blocks, rejection_reason, created_at
+                FROM instructors
+                ORDER BY
+                  CASE status
+                    WHEN 'pending' THEN 0
+                    WHEN 'active' THEN 1
+                    WHEN 'suspended' THEN 2
+                    WHEN 'rejected' THEN 3
+                    ELSE 4
+                  END,
+                  created_at DESC
+                """
+            )
+            rows = cursor.fetchall()
+    instructors = [serialize_instructor(row) for row in rows]
+    return {
+        "instructors": instructors,
+        "counts": {
+            "pending": sum(item["status"] == "pending" for item in instructors),
+            "active": sum(item["status"] == "active" for item in instructors),
+            "blocked": sum(item["status"] in {"suspended", "terminated", "rejected"} for item in instructors),
+        },
+    }
+
+
+@app.post("/admin/instructors/{uid}/approve")
+def approve_instructor(uid: str, _admin: dict[str, str] = Depends(current_admin)) -> dict[str, Any]:
+    with db_connection() as connection:
+        ensure_schema(connection)
+        instructor = fetch_instructor(connection, uid)
+        if not instructor:
+            raise HTTPException(status_code=404, detail="Instructor request was not found.")
+        if instructor["status"] not in {"pending", "rejected", "suspended"}:
+            raise HTTPException(status_code=400, detail="Only pending, rejected, or suspended accounts can be approved.")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE instructors SET status = 'active', rejection_reason = NULL WHERE uid = %s",
+                (uid,),
+            )
+        updated = fetch_instructor(connection, uid)
+    return {"instructor": serialize_instructor(updated), "message": "Instructor approved."}
+
+
+@app.post("/admin/instructors/{uid}/reject")
+def reject_instructor(
+    uid: str,
+    payload: InstructorDecision,
+    _admin: dict[str, str] = Depends(current_admin),
+) -> dict[str, Any]:
+    reason = " ".join(payload.reason.split())
+    with db_connection() as connection:
+        ensure_schema(connection)
+        instructor = fetch_instructor(connection, uid)
+        if not instructor:
+            raise HTTPException(status_code=404, detail="Instructor request was not found.")
+        if instructor["status"] not in {"pending", "active", "suspended"}:
+            raise HTTPException(status_code=400, detail="This account cannot be rejected.")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "UPDATE instructors SET status = 'rejected', rejection_reason = %s WHERE uid = %s",
+                (reason or None, uid),
+            )
+        updated = fetch_instructor(connection, uid)
+    return {"instructor": serialize_instructor(updated), "message": "Instructor request rejected."}
+
+
+@app.post("/admin/instructors/{uid}/suspend")
+def suspend_instructor(uid: str, _admin: dict[str, str] = Depends(current_admin)) -> dict[str, Any]:
+    with db_connection() as connection:
+        ensure_schema(connection)
+        instructor = fetch_instructor(connection, uid)
+        if not instructor:
+            raise HTTPException(status_code=404, detail="Instructor was not found.")
+        if instructor["status"] != "active":
+            raise HTTPException(status_code=400, detail="Only active instructors can be suspended.")
+        with connection.cursor() as cursor:
+            cursor.execute("UPDATE instructors SET status = 'suspended' WHERE uid = %s", (uid,))
+        updated = fetch_instructor(connection, uid)
+    return {"instructor": serialize_instructor(updated), "message": "Instructor suspended."}
 
 
 def list_class_blocks(connection: Any) -> list[dict[str, Any]]:

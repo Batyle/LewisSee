@@ -993,6 +993,148 @@ a.back {
   line-height: 1.55;
 }
 
+.admin-section {
+  margin-top: 16px;
+}
+
+.admin-section-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.admin-section-head h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 1.1rem;
+  font-weight: 800;
+}
+
+.admin-section-head p {
+  margin: 5px 0 0;
+  color: var(--muted);
+}
+
+.admin-refresh,
+.admin-action-approve,
+.admin-action-reject {
+  flex: none;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.admin-action-approve {
+  border-color: var(--good);
+  background: var(--good);
+  color: #fff;
+}
+
+.admin-action-reject {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.admin-people-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.admin-person-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+}
+
+.admin-person-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.admin-person-main > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.admin-person-main b {
+  color: var(--text);
+}
+
+.admin-person-main small {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+.admin-person-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--chip);
+  color: var(--primary);
+  font-weight: 800;
+}
+
+.admin-person-actions {
+  display: flex;
+  gap: 8px;
+  flex: none;
+}
+
+.admin-status {
+  margin-left: 6px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.admin-status-active {
+  color: var(--good);
+}
+
+.admin-status-rejected,
+.admin-status-terminated,
+.admin-status-suspended {
+  color: var(--danger);
+}
+
+.admin-banner {
+  margin: 0 0 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.admin-banner-error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.admin-banner-ok {
+  border-color: var(--good);
+  color: var(--good);
+}
+
 .admin-loading {
   display: grid;
   place-items: center;
@@ -1061,5 +1203,15 @@ a.back {
   .admin-user-chip {
     max-width: none;
     flex: 1;
+  }
+
+  .admin-section-head,
+  .admin-person-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-person-actions {
+    justify-content: flex-end;
   }
 }
