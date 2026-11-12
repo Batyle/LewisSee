@@ -1,9 +1,13 @@
 import emailjs from "@emailjs/browser";
 
+const ADMIN_EMAILJS_SERVICE_ID = "service_mviuuof";
+const ADMIN_EMAILJS_TEMPLATE_ID = "template_31qn7az";
+const ADMIN_EMAILJS_PUBLIC_KEY = "ltI55387fZQ7ayUP-";
+
 export async function sendInstructorDecisionEmail(instructor, decision) {
-  const serviceId = import.meta.env.VITE_ADMIN_EMAILJS_SERVICE_ID?.trim();
-  const templateId = import.meta.env.VITE_ADMIN_EMAILJS_TEMPLATE_ID?.trim();
-  const publicKey = import.meta.env.VITE_ADMIN_EMAILJS_PUBLIC_KEY?.trim();
+  const serviceId = import.meta.env.VITE_ADMIN_EMAILJS_SERVICE_ID?.trim() || ADMIN_EMAILJS_SERVICE_ID;
+  const templateId = import.meta.env.VITE_ADMIN_EMAILJS_TEMPLATE_ID?.trim() || ADMIN_EMAILJS_TEMPLATE_ID;
+  const publicKey = import.meta.env.VITE_ADMIN_EMAILJS_PUBLIC_KEY?.trim() || ADMIN_EMAILJS_PUBLIC_KEY;
 
   if (!instructor.email?.trim()) {
     throw new Error("The instructor account has no email address.");
