@@ -21,7 +21,7 @@ export async function sendInstructorDecisionEmail(instructor, decision) {
     ? "Your instructor access request has been approved. You can now sign in to LewisSee."
     : "Your instructor access request has been denied.";
 
-  await emailjs.send(
+  return emailjs.send(
     serviceId,
     templateId,
     {

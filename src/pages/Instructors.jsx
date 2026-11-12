@@ -97,10 +97,13 @@ export default function Instructors() {
       let actionNotice = result.message || "Instructor updated.";
       if (emailDecision && result.instructor) {
         try {
-          await sendInstructorDecisionEmail(result.instructor, emailDecision);
-          actionNotice += " Notification email sent.";
+          const emailResponse = await sendInstructorDecisionEmail(result.instructor, emailDecision);
+          actionNotice += ` EmailJS accepted the notification for ${result.instructor.email} (HTTP ${emailResponse.status}); this does not confirm inbox delivery. Check EmailJS Email History and the recipient's spam folder.`;
         } catch (cause) {
-          actionNotice += ` The account was updated, but the notification email failed: ${cause.message || "EmailJS error."}`;
+          const emailError = cause?.text
+            ? `EmailJS returned HTTP ${cause.status}: ${cause.text}`
+            : cause.message || "EmailJS error.";
+          actionNotice += ` The account was updated, but EmailJS rejected the notification: ${emailError}`;
         }
       }
       setNotice(actionNotice);
