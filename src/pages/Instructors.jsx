@@ -5,6 +5,7 @@ import {
   rejectInstructor,
   suspendInstructor,
 } from "../api/adminApi";
+import { sendInstructorDecisionEmail } from "../api/instructorNotifications";
 
 const formatBlocks = (blocks = []) => {
   if (!Array.isArray(blocks) || blocks.length === 0) return "No blocks requested";
@@ -87,13 +88,22 @@ export default function Instructors() {
     [instructors],
   );
 
-  const runAction = async (uid, action) => {
+  const runAction = async (uid, action, emailDecision) => {
     setBusyUid(uid);
     setError("");
     setNotice("");
     try {
       const result = await action();
-      setNotice(result.message || "Instructor updated.");
+      let actionNotice = result.message || "Instructor updated.";
+      if (emailDecision && result.instructor) {
+        try {
+          await sendInstructorDecisionEmail(result.instructor, emailDecision);
+          actionNotice += " Notification email sent.";
+        } catch (cause) {
+          actionNotice += ` The account was updated, but the notification email failed: ${cause.message || "EmailJS error."}`;
+        }
+      }
+      setNotice(actionNotice);
       await load();
     } catch (cause) {
       setError(cause.message || "Unable to update this instructor.");
@@ -170,7 +180,7 @@ export default function Instructors() {
                     type="button"
                     className="admin-action-approve"
                     disabled={busyUid === person.uid}
-                    onClick={() => runAction(person.uid, () => approveInstructor(person.uid))}
+                    onClick={() => runAction(person.uid, () => approveInstructor(person.uid), "approved")}
                   >
                     Approve
                   </button>
@@ -181,7 +191,7 @@ export default function Instructors() {
                     onClick={() => {
                       const reason = window.prompt("Optional rejection reason:", "");
                       if (reason !== null) {
-                        void runAction(person.uid, () => rejectInstructor(person.uid, reason));
+                        void runAction(person.uid, () => rejectInstructor(person.uid, reason), "rejected");
                       }
                     }}
                   >
@@ -241,7 +251,7 @@ export default function Instructors() {
                       type="button"
                       className="admin-action-approve"
                       disabled={busyUid === person.uid}
-                      onClick={() => runAction(person.uid, () => approveInstructor(person.uid))}
+                      onClick={() => runAction(person.uid, () => approveInstructor(person.uid), "approved")}
                     >
                       Reactivate
                     </button>

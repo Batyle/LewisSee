@@ -126,6 +126,8 @@ In EmailJS, set the template's recipient field to `{{to_email}}`. The app suppli
 
 For example, the email body can contain: `Hello {{student_name}}, {{message}}`
 
+Instructor approvals and rejections use a separate EmailJS template. Set the Vercel Production (and Preview, if used) variables `VITE_ADMIN_EMAILJS_SERVICE_ID`, `VITE_ADMIN_EMAILJS_TEMPLATE_ID`, and `VITE_ADMIN_EMAILJS_PUBLIC_KEY`, then redeploy. In that EmailJS template, set the recipient to `{{to_email}}`; available variables are `to_name`, `instructor_name`, `decision` (`approved` or `rejected`), `status`, `message`, and `reason`. EmailJS public keys are intended for browser use; do not put a private EmailJS access token in a `VITE_` variable. If delivery fails, the account decision remains saved and the admin page reports the email failure.
+
 EmailJS domain allowlisting is an optional paid-plan security feature. It is not needed for EmailJS's free plan; if you later enable it, allow the local development origin and the GitHub Pages origin (for example, `http://localhost:5173` and `https://batyle.github.io`).
 
 Restart the Vite development server after changing any `VITE_` setting.
