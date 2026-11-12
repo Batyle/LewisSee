@@ -80,7 +80,7 @@ If the service is offline or the frame is classified as a photo/screen, attendan
 
 ### Deploy this project (Vercel + Aiven; Render only for face liveness/attendance)
 
-1. Push this repository to GitHub, then import it into Vercel. Set **Root Directory** to the repository root (not `client`) so Vercel can find both the root Vite app and its `api/` functions. Vercel detects Vite automatically; its build command is `npm run build` and output directory is `dist`. The `api/` directory deploys the admin, instructor-request, instructor-login, and class-list endpoints as Vercel Functions, so these endpoints read the live MySQL database without a separate Render service.
+1. Push this repository to GitHub, then import it into Vercel. Set **Root Directory** to the repository root (not `client`) so Vercel can find both the root Vite app and its `api/` functions. Vercel detects Vite automatically; its build command is `npm run build` and output directory is `dist`. The `api/` directory deploys explicit admin, instructor-request, instructor-login, and class-list routes as Vercel Functions, so these endpoints read the live MySQL database without a separate Render service.
 2. In Vercel, open **Project → Settings → Environment Variables** and add these server-side variables for **Production** (and Preview if used):
 
    ```text
