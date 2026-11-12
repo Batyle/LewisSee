@@ -38,7 +38,7 @@ Alternatively, set the database values in the same PowerShell session:
 $env:DB_CONNECTION = "mysql"
 $env:DB_HOST = "mysql-17d8f649-huwaiiboyjustboy-b83e.d.aivencloud.com"
 $env:DB_PORT = "28270"
-$env:DB_DATABASE = "defaultdb"
+$env:DB_DATABASE = "LewisSee"
 $env:DB_USERNAME = "avnadmin"
 $env:DB_PASSWORD = "your_database_password"
 $env:DB_SSL_MODE = "REQUIRED"
@@ -81,7 +81,7 @@ If the service is offline or the frame is classified as a photo/screen, attendan
 ### Deploy this project now (Vercel + Render + Aiven)
 
 1. Push this repository to GitHub, then import it into Vercel. Vercel detects Vite automatically; its build command is `npm run build` and output directory is `dist`.
-2. Create a Render **Blueprint** from the same repository. It reads `render.yaml` and deploys `liveness-server/Dockerfile`. In Render, provide the `DB_PASSWORD` and `ADMIN_JWT_SECRET` secrets (do not put them in the repository). The service already has the Aiven host, port, user, database `LewisSee`, and required TLS mode.
+2. Create a Render **Blueprint** from the same repository. It reads `render.yaml` and deploys `liveness-server/Dockerfile`. In Render, provide the rotated `DB_PASSWORD` and an `ADMIN_JWT_SECRET` of at least 32 characters (do not put secrets in the repository). The service already has the Aiven host, port, user, database `LewisSee`, and required TLS mode. The Python API connects to MySQL; Vercel must call this API and must never receive the database password.
 3. When Render finishes, copy its HTTPS address, for example `https://faceattend-liveness.onrender.com`. Add these Vercel Production variables and redeploy:
 
    ```text
