@@ -278,7 +278,11 @@ export default async function handler(req, res) {
     if (path.length !== 2) return respond(res, 404, { message: "Route not found." });
     return await handleInstructorAuth(req, res, path[1], pool);
   } catch (error) {
-    console.error("Vercel API request failed:", error.code || error.name);
+    console.error("Vercel API request failed:", {
+      name: error?.name,
+      code: error?.code,
+      message: error?.message,
+    });
     return respond(res, 503, { message: getDatabaseErrorMessage(error) });
   }
 }
