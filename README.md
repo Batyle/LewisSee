@@ -78,19 +78,32 @@ Set the same variables for Vercel Preview deployments if you test preview builds
 
 If the service is offline or the frame is classified as a photo/screen, attendance is not saved. The model reduces presentation attacks but should not be treated as a guarantee against every advanced replay or deepfake attack.
 
-### Deploy this project now (Vercel + Render + Aiven)
+### Deploy this project (Vercel + Aiven; Render only for face liveness/attendance)
 
-1. Push this repository to GitHub, then import it into Vercel. Vercel detects Vite automatically; its build command is `npm run build` and output directory is `dist`.
-2. Create a Render **Blueprint** from the same repository. It reads `render.yaml` and deploys `liveness-server/Dockerfile`. In Render, provide the rotated `DB_PASSWORD` and an `ADMIN_JWT_SECRET` of at least 32 characters (do not put secrets in the repository). The service already has the Aiven host, port, user, database `LewisSee`, and required TLS mode. The Python API connects to MySQL; Vercel must call this API and must never receive the database password.
-3. When Render finishes, copy its HTTPS address, for example `https://faceattend-liveness.onrender.com`. Add these Vercel Production variables and redeploy:
+1. Push this repository to GitHub, then import it into Vercel. Vercel detects Vite automatically; its build command is `npm run build` and output directory is `dist`. The `api/` directory deploys the admin, instructor-request, instructor-login, and class-list endpoints as Vercel Functions, so these endpoints read the live MySQL database without a separate Render service.
+2. In Vercel, open **Project → Settings → Environment Variables** and add these server-side variables for **Production** (and Preview if used):
 
    ```text
-   VITE_LIVENESS_API_URL=https://faceattend-liveness.onrender.com/liveness
-   VITE_ATTENDANCE_API_URL=https://faceattend-liveness.onrender.com/attendance
-   VITE_ADMIN_API_URL=https://faceattend-liveness.onrender.com/admin
+   DB_HOST=mysql-17d8f649-huwaiiboyjustboy-b83e.d.aivencloud.com
+   DB_PORT=28270
+   DB_DATABASE=LewisSee
+   DB_USERNAME=avnadmin
+   DB_PASSWORD=YOUR_NEW_AIVEN_PASSWORD
+   DB_SSL_MODE=REQUIRED
+   ADMIN_JWT_SECRET=YOUR_RANDOM_SECRET_AT_LEAST_32_CHARACTERS
    ```
 
-4. The supplied container default allows Vercel subdomains. Add the same `VITE_` variables to Vercel Preview if preview deployments should work.
+   Enter the rotated database password in Vercel; never commit it or use a `VITE_` prefix. Create a different long random JWT secret and keep it private. Vercel Functions use the project’s server-side environment and never send these values to the browser.
+3. If `VITE_ADMIN_API_URL` is currently set to a Render URL, change it to `/api/admin` or remove it. Production defaults to the same-origin Vercel Functions at `/api`, so this variable is optional. The instructor-request form and the Admin → Instructors page will then use the same Aiven database.
+4. Attendance scanning still needs the Python service for anti-spoofing and attendance storage. If you use Render for that service, set its `DB_PASSWORD` to the rotated Aiven password too, deploy it, and set its HTTPS endpoints in Vercel:
+
+   ```text
+   VITE_LIVENESS_API_URL=https://YOUR-RENDER-HOST/liveness
+   VITE_ATTENDANCE_API_URL=https://YOUR-RENDER-HOST/attendance
+   ```
+
+   The Render service also needs `ADMIN_JWT_SECRET` if it verifies instructor sessions. Use the same secret value as Vercel when both services need to verify the same tokens.
+5. After saving Vercel environment variables, open **Deployments**, redeploy the latest production deployment, and wait for it to finish. Open `https://YOUR-VERCEL-DOMAIN/api/blocks`; a JSON response containing `blocks` confirms the Vercel Function can read MySQL. Then submit an instructor access request and check **Admin → Instructors**.
 
 `/health` is the Render health check. Opening the Vercel URL and enrolling a student will create the MySQL tables automatically. Aiven's connection details were tested against `LewisSee` with TLS successfully; the password is intentionally not saved in this repository.
 
