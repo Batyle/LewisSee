@@ -1,6 +1,7 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
+import { listBlocks } from "./_lib/blocks.js";
 import { getPool } from "./_lib/database.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -72,20 +73,6 @@ async function requireAdmin(req) {
   const admin = rows[0];
   if (!admin || admin.role !== "admin") return { error: [403, "Access denied."] };
   return { admin };
-}
-
-async function listBlocks(pool) {
-  const [rows] = await pool.execute(
-    "SELECT course, year_level, block FROM class_groups ORDER BY course, year_level, block",
-  );
-  return rows.map((row, index) => ({
-    id: index + 1,
-    name: `${row.course} ${row.year_level}-${row.block}`,
-    schedule: `${row.course} Year ${row.year_level} Block ${row.block}`,
-    course: row.course,
-    yearLevel: Number(row.year_level),
-    block: row.block,
-  }));
 }
 
 async function handleAdmin(req, res, path, pool) {
@@ -278,16 +265,6 @@ export default async function handler(req, res) {
     path = getPath(req);
   } catch {
     return respond(res, 400, { message: "Invalid request path." });
-  }
-
-  if (path[0] === "blocks" && path.length === 1 && req.method === "GET") {
-    try {
-      const blocks = await listBlocks(getPool());
-      return respond(res, 200, { blocks });
-    } catch (error) {
-      console.error("Vercel API database request failed:", error.code || error.name);
-      return respond(res, 503, { message: "Could not read the live database. Check the Vercel DB_* environment variables and Aiven network access." });
-    }
   }
 
   if (path[0] !== "admin" && path[0] !== "instructor-auth") {

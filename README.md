@@ -80,7 +80,7 @@ If the service is offline or the frame is classified as a photo/screen, attendan
 
 ### Deploy this project (Vercel + Aiven; Render only for face liveness/attendance)
 
-1. Push this repository to GitHub, then import it into Vercel. Vercel detects Vite automatically; its build command is `npm run build` and output directory is `dist`. The `api/` directory deploys the admin, instructor-request, instructor-login, and class-list endpoints as Vercel Functions, so these endpoints read the live MySQL database without a separate Render service.
+1. Push this repository to GitHub, then import it into Vercel. Set **Root Directory** to the repository root (not `client`) so Vercel can find both the root Vite app and its `api/` functions. Vercel detects Vite automatically; its build command is `npm run build` and output directory is `dist`. The `api/` directory deploys the admin, instructor-request, instructor-login, and class-list endpoints as Vercel Functions, so these endpoints read the live MySQL database without a separate Render service.
 2. In Vercel, open **Project → Settings → Environment Variables** and add these server-side variables for **Production** (and Preview if used):
 
    ```text
@@ -94,7 +94,7 @@ If the service is offline or the frame is classified as a photo/screen, attendan
    ```
 
    Enter the rotated database password in Vercel; never commit it or use a `VITE_` prefix. Create a different long random JWT secret and keep it private. Vercel Functions use the project’s server-side environment and never send these values to the browser.
-3. If `VITE_ADMIN_API_URL` is currently set to a Render URL, change it to `/api/admin` or remove it. Production defaults to the same-origin Vercel Functions at `/api`, so this variable is optional. The instructor-request form and the Admin → Instructors page will then use the same Aiven database.
+3. Remove any `VITE_ADMIN_API_URL` value that points to Render or localhost. Production uses the same-origin Vercel Functions at `/api` regardless of that setting, so the variable is not needed. The instructor-request form and the Admin → Instructors page will then use the same Aiven database.
 4. Attendance scanning still needs the Python service for anti-spoofing and attendance storage. If you use Render for that service, set its `DB_PASSWORD` to the rotated Aiven password too, deploy it, and set its HTTPS endpoints in Vercel:
 
    ```text
