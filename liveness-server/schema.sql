@@ -4,6 +4,30 @@
 
 USE `LewisSee`;
 
+-- MySQL-backed admin accounts. Passwords must be bcrypt hashes, never plain text.
+CREATE TABLE IF NOT EXISTS admins (
+  uid VARCHAR(64) PRIMARY KEY,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  password_hash VARCHAR(255) NOT NULL,
+  role VARCHAR(16) NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT admins_role_check CHECK (role = 'admin')
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- Step 2 will add the management endpoints; this preserves the shared instructor schema.
+CREATE TABLE IF NOT EXISTS instructors (
+  uid VARCHAR(64) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  role VARCHAR(16) NOT NULL,
+  status VARCHAR(16) NOT NULL,
+  email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+  assigned_blocks JSON NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT instructors_role_check CHECK (role = 'instructor'),
+  CONSTRAINT instructors_status_check CHECK (status IN ('pending', 'active', 'suspended', 'terminated'))
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS class_groups (
   course VARCHAR(64) NOT NULL,
   year_level TINYINT UNSIGNED NOT NULL,

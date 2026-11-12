@@ -1,0 +1,155 @@
+/* Attendance workspace refinements using shared theme tokens */
+
+body:has(.attendance-app) {
+  background: var(--bg);
+  color: var(--text);
+}
+
+.attendance-app {
+  width: min(1200px, calc(100% - 48px));
+  padding: 8px 0 52px;
+  color: var(--text);
+}
+
+.attendance-app .topbar {
+  min-height: 64px;
+  padding: 14px 18px;
+  border-radius: 10px;
+}
+
+.attendance-app .brand-mark {
+  width: 36px;
+  height: 36px;
+  border-radius: 11px;
+}
+
+.attendance-app .sign-out {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
+  padding: 8px 12px;
+}
+
+.attendance-app .sign-out:hover {
+  background: var(--chip);
+}
+
+.attendance-app select,
+.attendance-app input {
+  min-height: 40px;
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--line);
+}
+
+.attendance-app .workspace-nav {
+  gap: 4px;
+  margin-top: 16px;
+  padding: 5px;
+  border-radius: 10px;
+}
+
+.attendance-app .workspace-nav button {
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 0.84rem;
+}
+
+.attendance-app .page-heading {
+  padding: 28px 2px 18px;
+  align-items: end;
+}
+
+.attendance-app .page-heading h1 {
+  color: var(--text);
+}
+
+.attendance-app .camera-card,
+.attendance-app .records-card,
+.attendance-app .management-card,
+.attendance-app .enrollment-section {
+  border-radius: 10px;
+}
+
+.attendance-app .camera-card,
+.attendance-app .records-card,
+.attendance-app .management-card {
+  padding: 22px;
+}
+
+.attendance-app .live-pill {
+  background: var(--chip);
+  color: var(--primary);
+}
+
+.attendance-app .live-pill.on {
+  background: var(--good);
+  color: #fff;
+}
+
+.attendance-app .camera-wrap {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg);
+}
+
+.attendance-app .scan-summary span,
+.attendance-app .history-table-wrap th {
+  background: var(--chip);
+}
+
+.attendance-app .history-table-wrap {
+  border: 1px solid var(--line);
+  border-radius: 12px;
+}
+
+.attendance-app .secondary-button,
+.attendance-app .edit-student {
+  background: var(--surface);
+  color: var(--primary);
+  border: 1px solid var(--accent);
+}
+
+.attendance-app .danger-button,
+.attendance-app .delete-student {
+  background: var(--surface);
+  color: var(--danger);
+  border: 1px solid var(--danger);
+}
+
+.attendance-app .enroll-button {
+  border-radius: 10px;
+  box-shadow: none;
+}
+
+.attendance-app .enroll-button::before {
+  display: none;
+}
+
+.attendance-app .class-row:hover,
+.attendance-app .student-row:hover {
+  background: var(--chip);
+}
+
+.attendance-app .student-modal {
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  box-shadow: none;
+}
+
+.admin-content .attendance-app .topbar {
+  margin-top: 4px;
+}
+
+@media (max-width: 800px) {
+  .attendance-app {
+    width: min(100% - 28px, 720px);
+  }
+
+  .attendance-app .camera-card,
+  .attendance-app .records-card,
+  .attendance-app .management-card {
+    padding: 16px;
+  }
+}

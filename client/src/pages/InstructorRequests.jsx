@@ -1,0 +1,1 @@
+export default function InstructorRequests() { return <><h2 className="text-2xl font-bold">Instructor Requests</h2><p className="mt-2 text-slate-600">Request review and approval will be available in Step 2.</p></>; }

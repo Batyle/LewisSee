@@ -10,14 +10,18 @@ from __future__ import annotations
 import os
 import sys
 import json
+from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+import bcrypt
 import cv2
+import jwt
 import numpy as np
 import pymysql
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -32,6 +36,7 @@ from src.generate_patches import CropImage  # noqa: E402
 from src.utility import parse_model_name  # noqa: E402
 
 app = FastAPI(title="FaceAttend liveness service")
+bearer_scheme = HTTPBearer(auto_error=False)
 cors_origins = [
     origin.strip()
     for origin in os.getenv(
@@ -84,6 +89,11 @@ class AttendanceStore(BaseModel):
     students: list[Student]
     records: list[AttendanceRecord]
     classes: list[ClassGroup] = Field(default_factory=list)
+
+
+class AdminLogin(BaseModel):
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=1, max_length=128)
 
 
 def database_settings() -> dict[str, Any]:
@@ -151,6 +161,30 @@ def db_connection():
 def ensure_schema(connection: Any) -> None:
     with connection.cursor() as cursor:
         cursor.execute("""
+            CREATE TABLE IF NOT EXISTS admins (
+              uid VARCHAR(64) PRIMARY KEY,
+              email VARCHAR(255) NOT NULL UNIQUE,
+              password_hash VARCHAR(255) NOT NULL,
+              role VARCHAR(16) NOT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              CONSTRAINT admins_role_check CHECK (role = 'admin')
+            ) CHARACTER SET utf8mb4
+        """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS instructors (
+              uid VARCHAR(64) PRIMARY KEY,
+              name VARCHAR(255) NOT NULL,
+              email VARCHAR(255) NOT NULL UNIQUE,
+              role VARCHAR(16) NOT NULL,
+              status VARCHAR(16) NOT NULL,
+              email_verified BOOLEAN NOT NULL DEFAULT FALSE,
+              assigned_blocks JSON NOT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              CONSTRAINT instructors_role_check CHECK (role = 'instructor'),
+              CONSTRAINT instructors_status_check CHECK (status IN ('pending', 'active', 'suspended', 'terminated'))
+            ) CHARACTER SET utf8mb4
+        """)
+        cursor.execute("""
             CREATE TABLE IF NOT EXISTS class_groups (
               course VARCHAR(64) NOT NULL,
               year_level TINYINT UNSIGNED NOT NULL,
@@ -199,6 +233,70 @@ def ensure_schema(connection: Any) -> None:
               KEY attendance_by_date (attendance_date, section)
             ) CHARACTER SET utf8mb4
         """)
+
+
+def jwt_secret() -> str:
+    secret = os.getenv("ADMIN_JWT_SECRET", "")
+    if len(secret) < 32:
+        raise HTTPException(status_code=503, detail="Admin authentication is not configured.")
+    return secret
+
+
+def current_admin(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer_scheme),
+) -> dict[str, str]:
+    if not credentials or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required.")
+    try:
+        claims = jwt.decode(credentials.credentials, jwt_secret(), algorithms=["HS256"])
+        uid = claims.get("sub")
+        if not uid:
+            raise jwt.InvalidTokenError("Missing subject")
+    except jwt.PyJWTError as error:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired session.") from error
+
+    # Read the role from MySQL on every protected request so revoked accounts
+    # lose access immediately, rather than waiting for token expiration.
+    with db_connection() as connection:
+        ensure_schema(connection)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT uid, email, role FROM admins WHERE uid = %s", (uid,))
+            admin = cursor.fetchone()
+    if not admin or admin["role"] != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Access denied")
+    return admin
+
+
+@app.post("/admin/login")
+def admin_login(credentials: AdminLogin) -> dict[str, Any]:
+    """Verify a MySQL admin password and issue a short-lived signed token."""
+    with db_connection() as connection:
+        ensure_schema(connection)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT uid, email, password_hash, role FROM admins WHERE LOWER(email) = LOWER(%s)",
+                (credentials.email.strip(),),
+            )
+            admin = cursor.fetchone()
+
+    password_matches = False
+    if admin:
+        try:
+            password_matches = bcrypt.checkpw(credentials.password.encode("utf-8"), admin["password_hash"].encode("utf-8"))
+        except (ValueError, TypeError):
+            password_matches = False
+    if not admin or not password_matches or admin["role"] != "admin":
+        # Keep this deliberately generic so emails and roles cannot be enumerated.
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid email or password.")
+
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=8)
+    token = jwt.encode({"sub": admin["uid"], "exp": expires_at}, jwt_secret(), algorithm="HS256")
+    return {"token": token, "admin": {"uid": admin["uid"], "email": admin["email"], "role": admin["role"]}}
+
+
+@app.get("/admin/me")
+def get_current_admin(admin: dict[str, str] = Depends(current_admin)) -> dict[str, str]:
+    return {"uid": admin["uid"], "email": admin["email"], "role": admin["role"]}
 
 
 @app.get("/attendance")

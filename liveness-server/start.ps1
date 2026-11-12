@@ -8,7 +8,7 @@ if (-not (Test-Path -LiteralPath $python)) {
 $databaseConfig = Join-Path $root ".env.database"
 if (Test-Path -LiteralPath $databaseConfig) {
     Get-Content -LiteralPath $databaseConfig | ForEach-Object {
-        if ($_ -match "^\s*(DB_(?:CONNECTION|HOST|PORT|DATABASE|USERNAME|PASSWORD|SSL_MODE|SSL_CA))=(.*)$") {
+        if ($_ -match "^\s*((?:DB_(?:CONNECTION|HOST|PORT|DATABASE|USERNAME|PASSWORD|SSL_MODE|SSL_CA)|ADMIN_JWT_SECRET))=(.*)$") {
             Set-Item -Path "Env:$($matches[1])" -Value $matches[2]
         }
     }

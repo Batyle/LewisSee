@@ -17,6 +17,8 @@ Keep that service running at `http://127.0.0.1:8000` while running the Vite app.
 
 ## MySQL attendance database
 
+For local system testing, after configuring the Node API database variables, run `npm run seed:test` from `server/`. It creates or resets the MySQL accounts `admin` / `admin123` and `employee` / `employee123` (the employee account is active).
+
 Students (including their reference portrait and face descriptor) and dated attendance records are now stored by the Python service in MySQL. The browser uses `GET`/`PUT /attendance`; it never receives the MySQL password. The service creates the `students` and `attendance_records` tables on its first successful connection.
 
 To create the tables manually in MySQL Workbench, connect to the Aiven service with `defaultdb` as the default schema, then open and run [liveness-server/schema.sql](liveness-server/schema.sql). It is safe to run more than once and does not delete data.
@@ -51,7 +53,7 @@ For a deployed React site, deploy the Python service with those same `DB_*` vari
 VITE_ATTENDANCE_API_URL=https://YOUR-LIVENESS-HOST/attendance
 ```
 
-The initial load migrates the existing `attendance-students` and `attendance-records` browser cache only when the SQL database has no rows. Thereafter SQL is the source of truth. Back up biometric data and restrict the API to authenticated staff before exposing it publicly; the current demo staff access remains enabled by `TEST_STAFF_ACCESS` in `src/App.jsx`.
+The initial load migrates the existing `attendance-students` and `attendance-records` browser cache only when the SQL database has no rows. Thereafter SQL is the source of truth. Back up biometric data and restrict the API to authenticated staff before exposing it publicly.
 
 ## Vercel deployment
 

@@ -17,3 +17,5 @@ services:
         value: REQUIRED
       - key: DB_PASSWORD
         sync: false
+      - key: ADMIN_JWT_SECRET
+        sync: false

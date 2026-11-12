@@ -13,11 +13,14 @@
     "@emailjs/browser": "^5.0.3",
     "@tensorflow-models/face-landmarks-detection": "^1.0.6",
     "@tensorflow/tfjs": "^4.22.0",
+    "autoprefixer": "^10.6.2",
     "face-api.js": "^0.22.2",
-    "firebase": "^13.0.0",
+    "postcss": "^8.5.32",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
-    "react-webcam": "^7.2.0"
+    "react-router-dom": "^6.30.6",
+    "react-webcam": "^7.2.0",
+    "tailwindcss": "^3.4.19"
   },
   "devDependencies": {
     "@types/react": "^19.2.18",

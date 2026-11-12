@@ -1,0 +1,5 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+@layer base { body { @apply m-0 min-w-[320px] bg-slate-100 text-slate-900 antialiased; } button, input, select { font: inherit; } }
+@layer components { .input { @apply w-full rounded border border-slate-300 px-3 py-2 outline-none focus:border-sky-600 focus:ring-2 focus:ring-sky-100; } }
