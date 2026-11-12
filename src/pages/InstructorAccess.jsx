@@ -4,7 +4,26 @@ import AccessShell from "../components/AccessShell";
 import { clearAdminSession } from "../api/adminApi";
 import { useAuth } from "../context/AuthContext";
 
-const apiBase = () => import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:5000/api";
+/** Prefer the live MySQL API (liveness-server). Express `/api` remains a fallback. */
+const apiRoot = () => {
+  const adminUrl = import.meta.env.VITE_ADMIN_API_URL?.trim();
+  if (adminUrl) return adminUrl.replace(/\/admin\/?$/, "").replace(/\/$/, "");
+  const attendanceUrl = import.meta.env.VITE_ATTENDANCE_API_URL?.trim();
+  if (attendanceUrl) return attendanceUrl.replace(/\/attendance\/?$/, "").replace(/\/$/, "");
+  const expressUrl = import.meta.env.VITE_API_URL?.trim();
+  if (expressUrl) return expressUrl.replace(/\/api\/?$/, "").replace(/\/$/, "");
+  return "http://127.0.0.1:8000";
+};
+
+const apiErrorMessage = (data, fallback) => {
+  if (!data || typeof data !== "object") return fallback;
+  if (typeof data.message === "string" && data.message.trim()) return data.message;
+  if (typeof data.detail === "string" && data.detail.trim()) return data.detail;
+  if (Array.isArray(data.detail) && data.detail[0]?.msg) return data.detail[0].msg;
+  if (data.reason) return `${data.message || fallback} ${data.reason}`.trim();
+  return fallback;
+};
+
 const initialForm = { name: "", email: "", password: "", confirmPassword: "", requestedBlockIds: [] };
 
 function clearInstructorSession() {
@@ -17,14 +36,19 @@ async function signInInstructor(email, password) {
     return { token: "local-test-instructor", instructor: { name: "Employee", email: "employee" } };
   }
 
-  const response = await fetch(`${apiBase()}/instructor-auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
+  let response;
+  try {
+    response = await fetch(`${apiRoot()}/instructor-auth/login`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email, password }),
+    });
+  } catch {
+    throw new Error("Failed to reach the instructor API. Start liveness-server (port 8000) and confirm VITE_ADMIN_API_URL.");
+  }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(data.reason ? `${data.message} ${data.reason}` : data.message || "Invalid email or password.");
+    throw new Error(apiErrorMessage(data, "Invalid email or password."));
   }
   return data;
 }
@@ -46,10 +70,18 @@ export default function InstructorAccess() {
 
   useEffect(() => {
     if (mode !== "register") return;
-    fetch(`${apiBase()}/blocks`)
+    let cancelled = false;
+    fetch(`${apiRoot()}/blocks`)
       .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((data) => setBlocks(data.blocks || []))
-      .catch(() => setError("Available blocks could not be loaded."));
+      .then((data) => {
+        if (!cancelled) setBlocks(data.blocks || []);
+      })
+      .catch(() => {
+        if (!cancelled) setError("Available blocks could not be loaded. You can still submit; an admin can assign blocks later.");
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [mode]);
 
   if (!authLoading && user && isAdmin) {
@@ -77,19 +109,24 @@ export default function InstructorAccess() {
 
     try {
       if (mode === "register") {
-        const response = await fetch(`${apiBase()}/instructor-auth/register`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            name: form.name,
-            email,
-            password,
-            requestedBlockIds: form.requestedBlockIds,
-          }),
-        });
+        let response;
+        try {
+          response = await fetch(`${apiRoot()}/instructor-auth/register`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              name: form.name,
+              email,
+              password,
+              requestedBlockIds: form.requestedBlockIds,
+            }),
+          });
+        } catch {
+          throw new Error("Failed to reach the instructor API. Start liveness-server (port 8000) and confirm VITE_ADMIN_API_URL.");
+        }
         const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.message || "Unable to submit your request.");
-        setMessage("Request submitted — you'll be notified once an admin reviews it.");
+        if (!response.ok) throw new Error(apiErrorMessage(data, "Unable to submit your request."));
+        setMessage(data.message || "Request submitted — you'll be notified once an admin reviews it.");
         setForm(initialForm);
         return;
       }

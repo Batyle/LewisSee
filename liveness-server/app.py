@@ -10,6 +10,8 @@ from __future__ import annotations
 import os
 import sys
 import json
+import re
+import uuid
 from datetime import datetime, timedelta, timezone
 from contextlib import contextmanager
 from pathlib import Path
@@ -111,6 +113,21 @@ class AdminLogin(BaseModel):
     password: str = Field(min_length=1, max_length=128)
 
 
+class InstructorRegister(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    email: str = Field(min_length=3, max_length=255)
+    password: str = Field(min_length=8, max_length=128)
+    requestedBlockIds: list[int] = Field(default_factory=list)
+
+
+class InstructorLogin(BaseModel):
+    email: str = Field(min_length=1, max_length=255)
+    password: str = Field(min_length=1, max_length=128)
+
+
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
+
+
 def database_settings() -> dict[str, Any]:
     """Read credentials only from service environment variables, never Vite."""
     required = ("DB_HOST", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD")
@@ -190,15 +207,23 @@ def ensure_schema(connection: Any) -> None:
               uid VARCHAR(64) PRIMARY KEY,
               name VARCHAR(255) NOT NULL,
               email VARCHAR(255) NOT NULL UNIQUE,
+              password_hash VARCHAR(255) NULL,
               role VARCHAR(16) NOT NULL,
               status VARCHAR(16) NOT NULL,
               email_verified BOOLEAN NOT NULL DEFAULT FALSE,
               assigned_blocks JSON NOT NULL,
+              rejection_reason VARCHAR(500) NULL,
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
               CONSTRAINT instructors_role_check CHECK (role = 'instructor'),
-              CONSTRAINT instructors_status_check CHECK (status IN ('pending', 'active', 'suspended', 'terminated'))
+              CONSTRAINT instructors_status_check CHECK (status IN ('pending', 'active', 'suspended', 'terminated', 'rejected'))
             ) CHARACTER SET utf8mb4
         """)
+        cursor.execute("SHOW COLUMNS FROM instructors")
+        instructor_columns = {row["Field"] for row in cursor.fetchall()}
+        if "password_hash" not in instructor_columns:
+            cursor.execute("ALTER TABLE instructors ADD COLUMN password_hash VARCHAR(255) NULL AFTER email")
+        if "rejection_reason" not in instructor_columns:
+            cursor.execute("ALTER TABLE instructors ADD COLUMN rejection_reason VARCHAR(500) NULL")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS class_groups (
               course VARCHAR(64) NOT NULL,
@@ -312,6 +337,154 @@ def admin_login(credentials: AdminLogin) -> dict[str, Any]:
 @app.get("/admin/me")
 def get_current_admin(admin: dict[str, str] = Depends(current_admin)) -> dict[str, str]:
     return {"uid": admin["uid"], "email": admin["email"], "role": admin["role"]}
+
+
+def list_class_blocks(connection: Any) -> list[dict[str, Any]]:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT course, year_level, block FROM class_groups ORDER BY course, year_level, block"
+        )
+        rows = cursor.fetchall()
+    if not rows:
+        # Sensible starter options so new deployments can still submit a request.
+        rows = [
+            {"course": "BSIT", "year_level": 1, "block": "A"},
+            {"course": "BSIT", "year_level": 2, "block": "A"},
+            {"course": "BSIT", "year_level": 3, "block": "A"},
+            {"course": "BSIT", "year_level": 4, "block": "A"},
+        ]
+    return [
+        {
+            "id": index + 1,
+            "name": f"{row['course']} {row['year_level']}-{row['block']}",
+            "schedule": f"{row['course']} Year {row['year_level']} Block {row['block']}",
+            "course": row["course"],
+            "yearLevel": int(row["year_level"]),
+            "block": row["block"],
+        }
+        for index, row in enumerate(rows)
+    ]
+
+
+@app.get("/blocks")
+def get_blocks() -> dict[str, list[dict[str, Any]]]:
+    with db_connection() as connection:
+        ensure_schema(connection)
+        return {"blocks": list_class_blocks(connection)}
+
+
+@app.post("/instructor-auth/register")
+def instructor_register(payload: InstructorRegister) -> dict[str, Any]:
+    """Create a pending instructor account in the live MySQL database."""
+    normalized_email = payload.email.strip().lower()
+    name = " ".join(payload.name.split())
+    if not name or not EMAIL_PATTERN.match(normalized_email):
+        raise HTTPException(
+            status_code=400,
+            detail="Please provide a name, valid email, password of at least 8 characters, and valid requested block IDs.",
+        )
+    if any(block_id < 1 for block_id in payload.requestedBlockIds):
+        raise HTTPException(status_code=400, detail="Requested block IDs are invalid.")
+
+    password_hash = bcrypt.hashpw(payload.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+    with db_connection() as connection:
+        ensure_schema(connection)
+        blocks = list_class_blocks(connection)
+        by_id = {block["id"]: block for block in blocks}
+        selected = []
+        for block_id in payload.requestedBlockIds:
+            block = by_id.get(block_id)
+            if not block:
+                raise HTTPException(status_code=400, detail="Requested block IDs are invalid.")
+            selected.append(
+                {"course": block["course"], "yearLevel": block["yearLevel"], "block": block["block"]}
+            )
+        instructor_uid = str(uuid.uuid4())
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO instructors
+                      (uid, name, email, password_hash, role, status, email_verified, assigned_blocks)
+                    VALUES (%s, %s, %s, %s, 'instructor', 'pending', 0, %s)
+                    """,
+                    (instructor_uid, name, normalized_email, password_hash, json.dumps(selected)),
+                )
+        except pymysql.err.IntegrityError as error:
+            if getattr(error, "args", [None])[0] == 1062:
+                raise HTTPException(status_code=409, detail="An account with this email already exists.") from error
+            raise HTTPException(status_code=400, detail="Unable to submit your request.") from error
+
+    return {
+        "instructor": {
+            "id": instructor_uid,
+            "uid": instructor_uid,
+            "name": name,
+            "email": normalized_email,
+            "status": "pending",
+        },
+        "message": "Request submitted — you'll be notified once an admin reviews it.",
+    }
+
+
+@app.post("/instructor-auth/login")
+def instructor_login(payload: InstructorLogin) -> dict[str, Any]:
+    normalized_email = payload.email.strip().lower()
+    with db_connection() as connection:
+        ensure_schema(connection)
+        with connection.cursor() as cursor:
+            cursor.execute(
+                """
+                SELECT uid, name, email, password_hash, status, rejection_reason
+                FROM instructors
+                WHERE LOWER(email) = LOWER(%s)
+                """,
+                (normalized_email,),
+            )
+            instructor = cursor.fetchone()
+
+    password_matches = False
+    if instructor and instructor.get("password_hash"):
+        try:
+            password_matches = bcrypt.checkpw(
+                payload.password.encode("utf-8"),
+                instructor["password_hash"].encode("utf-8"),
+            )
+        except (ValueError, TypeError):
+            password_matches = False
+    if not instructor or not password_matches:
+        raise HTTPException(status_code=401, detail="Invalid email or password.")
+    if instructor["status"] == "pending":
+        raise HTTPException(status_code=403, detail="Your account is awaiting admin approval.")
+    if instructor["status"] == "rejected":
+        reason = (instructor.get("rejection_reason") or "").strip()
+        message = "Your request was denied."
+        if reason:
+            message = f"{message} {reason}"
+        raise HTTPException(status_code=403, detail=message)
+    if instructor["status"] == "suspended":
+        raise HTTPException(status_code=403, detail="Your account is suspended.")
+    if instructor["status"] == "terminated":
+        raise HTTPException(status_code=403, detail="Your account has been terminated.")
+    if instructor["status"] != "active":
+        raise HTTPException(status_code=403, detail="Your account cannot sign in yet.")
+
+    expires_at = datetime.now(timezone.utc) + timedelta(hours=8)
+    token = jwt.encode(
+        {"sub": instructor["uid"], "role": "instructor", "exp": expires_at},
+        jwt_secret(),
+        algorithm="HS256",
+    )
+    return {
+        "token": token,
+        "instructor": {
+            "id": instructor["uid"],
+            "uid": instructor["uid"],
+            "name": instructor["name"],
+            "email": instructor["email"],
+            "status": instructor["status"],
+        },
+    }
 
 
 @app.get("/attendance")
