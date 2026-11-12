@@ -1,7 +1,15 @@
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
-$venvRoot = if ($env:FACEATTEND_VENV) { $env:FACEATTEND_VENV } else { "C:\FaceAttend\liveness-venv" }
-$python = Join-Path $venvRoot "Scripts\python.exe"
-if (-not (Test-Path -LiteralPath $python)) {
+$localVenvPython = Join-Path $root ".venv\Scripts\python.exe"
+$sharedVenvRoot = if ($env:FACEATTEND_VENV) { $env:FACEATTEND_VENV } else { "C:\FaceAttend\liveness-venv" }
+$sharedVenvPython = Join-Path $sharedVenvRoot "Scripts\python.exe"
+$python = if (Test-Path -LiteralPath $localVenvPython) {
+    $localVenvPython
+} elseif (Test-Path -LiteralPath $sharedVenvPython) {
+    $sharedVenvPython
+} else {
+    $null
+}
+if (-not $python) {
     throw "Liveness dependencies are not installed. Run .\liveness-server\setup.ps1 first."
 }
 

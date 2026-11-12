@@ -1,24 +1,33 @@
 const tokenKey = "admin-session-token";
 const testToken = "local-test-admin";
 const testAdmin = { id: 0, name: "Administrator", email: "admin", role: "admin" };
+
 const endpoint = () => {
   const configured = import.meta.env.VITE_ADMIN_API_URL?.trim();
   if (configured) return configured.replace(/\/$/, "");
-  return import.meta.env.DEV ? "http://127.0.0.1:5000/api/auth" : "";
+  // Live MySQL admin auth is served by the liveness API under /admin.
+  return "http://127.0.0.1:8000/admin";
 };
 
 const request = async (path, options = {}) => {
   const baseUrl = endpoint();
   if (!baseUrl) throw new Error("Admin API is not configured for this deployment.");
   const token = localStorage.getItem(tokenKey);
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...options,
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      ...options.headers,
-    },
-  });
+  let response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      ...options,
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        ...options.headers,
+      },
+    });
+  } catch {
+    throw new Error(
+      "Failed to reach the MySQL admin API. Start liveness-server (port 8000) and confirm VITE_ADMIN_API_URL.",
+    );
+  }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.message || body.detail || "Unable to complete the request.");
   return body;

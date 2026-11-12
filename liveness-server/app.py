@@ -27,13 +27,32 @@ from fastapi.middleware.cors import CORSMiddleware
 
 ROOT = Path(__file__).resolve().parent
 MODEL_ROOT = ROOT / "Silent-Face-Anti-Spoofing"
-if not MODEL_ROOT.exists():
-    raise RuntimeError("Run liveness-server/setup.ps1 before starting this service.")
+models = MODEL_ROOT / "resources" / "anti_spoof_models"
+_predictor = None
+_cropper = None
+_parse_model_name = None
 
-sys.path.insert(0, str(MODEL_ROOT))
-from src.anti_spoof_predict import AntiSpoofPredict  # noqa: E402
-from src.generate_patches import CropImage  # noqa: E402
-from src.utility import parse_model_name  # noqa: E402
+
+def load_liveness_runtime():
+    """Lazy-load Torch anti-spoof so MySQL admin/attendance APIs still start if Torch is broken."""
+    global _predictor, _cropper, _parse_model_name
+    if _predictor is not None and _cropper is not None and _parse_model_name is not None:
+        return _predictor, _cropper, _parse_model_name
+    if not MODEL_ROOT.exists():
+        raise HTTPException(status_code=503, detail="Run liveness-server/setup.ps1 before starting this service.")
+    try:
+        if str(MODEL_ROOT) not in sys.path:
+            sys.path.insert(0, str(MODEL_ROOT))
+        from src.anti_spoof_predict import AntiSpoofPredict  # noqa: E402
+        from src.generate_patches import CropImage  # noqa: E402
+        from src.utility import parse_model_name  # noqa: E402
+        _predictor = AntiSpoofPredict(0)
+        _cropper = CropImage()
+        _parse_model_name = parse_model_name
+    except Exception as error:
+        raise HTTPException(status_code=503, detail="Anti-spoof runtime failed to load.") from error
+    return _predictor, _cropper, _parse_model_name
+
 
 app = FastAPI(title="FaceAttend liveness service")
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -41,7 +60,7 @@ cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "LIVENESS_CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173",
+        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
     ).split(",")
     if origin.strip()
 ]
@@ -53,10 +72,6 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "OPTIONS"],
     allow_headers=["*"],
 )
-
-models = MODEL_ROOT / "resources" / "anti_spoof_models"
-predictor = AntiSpoofPredict(0)
-cropper = CropImage()
 
 
 class Student(BaseModel):
@@ -398,7 +413,11 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
 
 @app.get("/health")
 def health():
-    return {"ready": models.is_dir()}
+    return {
+        "ready": models.is_dir(),
+        "databaseConfigured": all(os.getenv(name) for name in ("DB_HOST", "DB_DATABASE", "DB_USERNAME", "DB_PASSWORD")),
+        "adminAuthConfigured": len(os.getenv("ADMIN_JWT_SECRET", "")) >= 32,
+    }
 
 
 @app.post("/liveness")
@@ -412,6 +431,7 @@ async def liveness(image: UploadFile = File(...)):
         raise HTTPException(status_code=503, detail="Anti-spoof model files are unavailable.")
 
     try:
+        predictor, cropper, parse_model_name = load_liveness_runtime()
         bbox = predictor.get_bbox(frame)
         prediction = np.zeros((1, 3))
         model_count = 0
@@ -431,6 +451,8 @@ async def liveness(image: UploadFile = File(...)):
             model_count += 1
         if not model_count:
             raise RuntimeError("No anti-spoof model files were found.")
+    except HTTPException:
+        raise
     except Exception as error:
         raise HTTPException(status_code=422, detail="Could not verify a live face.") from error
 

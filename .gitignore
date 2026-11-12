@@ -33,4 +33,5 @@ liveness-server/*.log
 liveness-server/.env
 liveness-server/.env.database
 liveness-server/aiven-ca.pem
+server/aiven-ca.pem
 liveness-server/Silent-Face-Anti-Spoofing/

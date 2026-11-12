@@ -77,17 +77,18 @@ If the service is offline or the frame is classified as a photo/screen, attendan
 ### Deploy this project now (Vercel + Render + Aiven)
 
 1. Push this repository to GitHub, then import it into Vercel. Vercel detects Vite automatically; its build command is `npm run build` and output directory is `dist`.
-2. Create a Render **Blueprint** from the same repository. It reads `render.yaml` and deploys `liveness-server/Dockerfile`. In Render, provide the `DB_PASSWORD` secret (do not put it in the repository). The service already has the supplied Aiven host, port, user, `defaultdb`, and required TLS mode.
+2. Create a Render **Blueprint** from the same repository. It reads `render.yaml` and deploys `liveness-server/Dockerfile`. In Render, provide the `DB_PASSWORD` and `ADMIN_JWT_SECRET` secrets (do not put them in the repository). The service already has the Aiven host, port, user, database `LewisSee`, and required TLS mode.
 3. When Render finishes, copy its HTTPS address, for example `https://faceattend-liveness.onrender.com`. Add these Vercel Production variables and redeploy:
 
    ```text
    VITE_LIVENESS_API_URL=https://faceattend-liveness.onrender.com/liveness
    VITE_ATTENDANCE_API_URL=https://faceattend-liveness.onrender.com/attendance
+   VITE_ADMIN_API_URL=https://faceattend-liveness.onrender.com/admin
    ```
 
-4. In Render set `LIVENESS_CORS_ORIGINS=https://YOUR-PROJECT.vercel.app` if you want a strict origin allow-list. The supplied container default allows Vercel subdomains. Add the same two `VITE_` variables to Vercel Preview if preview deployments should work.
+4. In Render set `LIVENESS_CORS_ORIGINS=https://YOUR-PROJECT.vercel.app` if you want a strict origin allow-list. The supplied container default allows Vercel subdomains. Add the same `VITE_` variables to Vercel Preview if preview deployments should work.
 
-`/health` is the Render health check. Opening the Vercel URL and enrolling a student will create the MySQL tables automatically. Aiven's connection details were tested against `defaultdb` with TLS successfully; the password is intentionally not saved in this repository.
+`/health` is the Render health check. Opening the Vercel URL and enrolling a student will create the MySQL tables automatically. Aiven's connection details were tested against `LewisSee` with TLS successfully; the password is intentionally not saved in this repository.
 
 ## GitHub Pages deployment
 

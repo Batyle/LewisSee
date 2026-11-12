@@ -4,7 +4,7 @@ import AccessShell from "../components/AccessShell";
 import { clearAdminSession } from "../api/adminApi";
 import { useAuth } from "../context/AuthContext";
 
-const apiBase = () => import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://localhost:5000/api";
+const apiBase = () => import.meta.env.VITE_API_URL?.replace(/\/$/, "") || "http://127.0.0.1:5000/api";
 const initialForm = { name: "", email: "", password: "", confirmPassword: "", requestedBlockIds: [] };
 
 function clearInstructorSession() {
