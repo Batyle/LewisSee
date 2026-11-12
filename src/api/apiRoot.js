@@ -1,6 +1,17 @@
+const isLocalApiUrl = (url) => {
+  try {
+    const hostname = new URL(url, window.location.origin).hostname;
+    return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1";
+  } catch {
+    return false;
+  }
+};
+
+const isUsableApiUrl = (url) => url && (import.meta.env.DEV || !isLocalApiUrl(url));
+
 export function getApiRoot() {
   const adminUrl = import.meta.env.VITE_ADMIN_API_URL?.trim();
-  if (adminUrl) return adminUrl.replace(/\/admin\/?$/, "").replace(/\/$/, "");
+  if (isUsableApiUrl(adminUrl)) return adminUrl.replace(/\/admin\/?$/, "").replace(/\/$/, "");
   if (!import.meta.env.DEV) return "/api";
 
   const localApiUrls = [
@@ -16,7 +27,7 @@ export function getApiRoot() {
 
 export function getAdminApiUrl() {
   const configured = import.meta.env.VITE_ADMIN_API_URL?.trim();
-  if (configured) return configured.replace(/\/$/, "");
+  if (isUsableApiUrl(configured)) return configured.replace(/\/$/, "");
   return `${getApiRoot()}/admin`;
 }
 

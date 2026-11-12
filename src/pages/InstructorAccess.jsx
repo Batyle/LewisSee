@@ -50,6 +50,8 @@ export default function InstructorAccess() {
   const [mode, setMode] = useState(() => (location.state?.openLogin ? "login" : "choose"));
   const [form, setForm] = useState(initialForm);
   const [blocks, setBlocks] = useState([]);
+  const [blocksLoading, setBlocksLoading] = useState(false);
+  const [blocksError, setBlocksError] = useState("");
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -62,12 +64,30 @@ export default function InstructorAccess() {
     if (mode !== "register") return;
     let cancelled = false;
     fetch(getInstructorApiUrl("/blocks"))
-      .then((response) => (response.ok ? response.json() : Promise.reject()))
-      .then((data) => {
-        if (!cancelled) setBlocks(data.blocks || []);
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(apiErrorMessage(data, `Could not load courses and blocks (HTTP ${response.status}).`));
+        }
+        if (!Array.isArray(data.blocks)) {
+          throw new Error("The API returned an invalid courses and blocks list.");
+        }
+        return data.blocks;
       })
-      .catch(() => {
-        if (!cancelled) setError("Available blocks could not be loaded. You can still submit; an admin can assign blocks later.");
+      .then((availableBlocks) => {
+        if (!cancelled) {
+          setBlocks(availableBlocks);
+          setBlocksError(availableBlocks.length ? "" : "No courses or blocks were found in the live database.");
+        }
+      })
+      .catch((cause) => {
+        if (!cancelled) {
+          setBlocks([]);
+          setBlocksError(cause.message || "Unable to load courses and blocks.");
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setBlocksLoading(false);
       });
     return () => {
       cancelled = true;
@@ -83,6 +103,12 @@ export default function InstructorAccess() {
   }
 
   const update = (event) => setForm({ ...form, [event.target.name]: event.target.value });
+  const openRegistration = () => {
+    setBlocks([]);
+    setBlocksLoading(true);
+    setBlocksError("");
+    setMode("register");
+  };
 
   const submit = async (event) => {
     event.preventDefault();
@@ -180,7 +206,7 @@ export default function InstructorAccess() {
               <small>Admin or instructor — we detect which</small>
             </span>
           </button>
-          <button type="button" onClick={() => setMode("register")} className="choice">
+          <button type="button" onClick={openRegistration} className="choice">
             <span className="choice-icon" aria-hidden="true">+</span>
             <span className="choice-copy">
               <b>I need access</b>
@@ -272,11 +298,12 @@ export default function InstructorAccess() {
               />
             </label>
             <label>
-              Requested blocks
+              Courses and requested blocks
               <select
                 multiple
                 className="field field-select"
                 value={form.requestedBlockIds.map(String)}
+                disabled={blocksLoading || blocks.length === 0}
                 onChange={(event) =>
                   setForm({
                     ...form,
@@ -284,12 +311,19 @@ export default function InstructorAccess() {
                   })
                 }
               >
+                {blocks.length === 0 && (
+                  <option value="" disabled>
+                    {blocksLoading ? "Loading courses and blocks…" : "Courses and blocks unavailable"}
+                  </option>
+                )}
                 {blocks.map((block) => (
                   <option key={block.id} value={block.id}>
-                    {block.name} — {block.schedule}
+                    {block.course || block.name} — Year {block.yearLevel || "?"}, Block {block.block || "?"}
                   </option>
                 ))}
               </select>
+              {blocksError && <small className="alert error-alert" role="alert">{blocksError}</small>}
+              {!blocksError && blocks.length > 0 && <small>Select one or more course blocks.</small>}
             </label>
           </>
         )}
