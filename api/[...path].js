@@ -2,6 +2,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { randomUUID } from "node:crypto";
 import { listBlocks } from "./_lib/blocks.js";
+import { getDatabaseErrorMessage } from "./_lib/databaseErrorMessage.js";
 import { getPool } from "./_lib/database.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -278,6 +279,6 @@ export default async function handler(req, res) {
     return await handleInstructorAuth(req, res, path[1], pool);
   } catch (error) {
     console.error("Vercel API request failed:", error.code || error.name);
-    return respond(res, 503, { message: "The live database API is unavailable. Check its server-side environment configuration and Aiven network access." });
+    return respond(res, 503, { message: getDatabaseErrorMessage(error) });
   }
 }
