@@ -8,8 +8,6 @@ import {
   updateInstructor,
 } from "../api/adminApi";
 import {
-  ADMIN_EMAILJS_SERVICE_ID,
-  ADMIN_EMAILJS_TEMPLATE_ID,
   sendInstructorDecisionEmail,
   sendInstructorUpdateEmail,
 } from "../api/instructorNotifications";
@@ -104,18 +102,18 @@ export default function Instructors() {
     try {
       const result = await action();
       let actionNotice = result.message || "Instructor updated.";
-      if (emailDecision && result.instructor) {
-        try {
-          await sendInstructorDecisionEmail(result.instructor, emailDecision);
-          actionNotice += ` Email notification submitted for ${result.instructor.email}. If it does not arrive, check the EmailJS template recipient setting and Email History.`;
-        } catch (cause) {
-          if (cause?.status === 400 && /template id not found/i.test(cause?.text || "")) {
-            actionNotice += ` The account was updated, but EmailJS cannot find template ${ADMIN_EMAILJS_TEMPLATE_ID}. In EmailJS, confirm this exact template exists in the account for the configured public key and is connected to service ${ADMIN_EMAILJS_SERVICE_ID}.`;
-          } else {
-            const emailError = cause?.text
-              ? `EmailJS returned HTTP ${cause.status}: ${cause.text}`
-              : cause.message || "EmailJS error.";
-            actionNotice += ` The account was updated, but EmailJS rejected the notification: ${emailError}`;
+      if (emailDecision && result.instructor?.email) {
+        if (result.emailSent) {
+          actionNotice += ` Email notification sent to ${result.instructor.email}.`;
+        } else {
+          try {
+            await sendInstructorDecisionEmail(result.instructor, emailDecision);
+            actionNotice += ` Email notification sent to ${result.instructor.email}.`;
+          } catch (cause) {
+            const emailError = result.emailError
+              || (cause?.text ? `EmailJS HTTP ${cause.status}: ${cause.text}` : cause.message)
+              || "EmailJS error.";
+            actionNotice += ` The account was updated, but the email could not be sent: ${emailError}`;
           }
         }
       }
@@ -160,12 +158,16 @@ export default function Instructors() {
         newPassword: editForm.newPassword,
       });
       let actionNotice = result.message || "Instructor details updated.";
-      if (changedFields.length) {
-        try {
-          const emailResponse = await sendInstructorUpdateEmail(result.instructor, changedFields);
-          actionNotice += ` A separate update notification was accepted for ${result.instructor.email} (HTTP ${emailResponse.status}); this does not confirm inbox delivery.`;
-        } catch (cause) {
-          actionNotice += ` The account was updated, but the notification could not be sent: ${cause.message || "EmailJS error."}`;
+      if (changedFields.length && result.instructor?.email) {
+        if (result.emailSent) {
+          actionNotice += ` Email notification sent to ${result.instructor.email}.`;
+        } else {
+          try {
+            await sendInstructorUpdateEmail(result.instructor, changedFields);
+            actionNotice += ` Email notification sent to ${result.instructor.email}.`;
+          } catch (cause) {
+            actionNotice += ` The account was updated, but the email could not be sent: ${result.emailError || cause.message || "EmailJS error."}`;
+          }
         }
       }
       setNotice(actionNotice);

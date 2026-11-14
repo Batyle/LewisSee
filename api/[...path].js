@@ -8,11 +8,80 @@ import { getPool } from "./_lib/database.js";
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const respond = (res, code, body) => res.status(code).json(body);
 
-async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
-  const serviceId = process.env.ADMIN_EMAILJS_SERVICE_ID || "service_42lrlwk";
-  const templateId = process.env.ADMIN_EMAILJS_TEMPLATE_ID || "template_cgf0ftr";
-  const publicKey = process.env.ADMIN_EMAILJS_PUBLIC_KEY || "_OxeAtIVSYaPNqVhG";
+const ADMIN_EMAILJS_SERVICE_ID = "service_42lrlwk";
+const ADMIN_EMAILJS_TEMPLATE_ID = "template_cgf0ftr";
+const ADMIN_EMAILJS_PUBLIC_KEY = "_OxeAtIVSYaPNqVhG";
+const EMAILJS_ORIGIN = process.env.EMAILJS_ORIGIN || process.env.CLIENT_URL?.split(",")[0]?.trim() || "https://lewissee.vercel.app";
 
+async function sendAdminEmailJs(templateParams) {
+  const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Origin: EMAILJS_ORIGIN,
+    },
+    body: JSON.stringify({
+      service_id: ADMIN_EMAILJS_SERVICE_ID,
+      template_id: ADMIN_EMAILJS_TEMPLATE_ID,
+      user_id: ADMIN_EMAILJS_PUBLIC_KEY,
+      template_params: templateParams,
+    }),
+  });
+  if (!emailResponse.ok) {
+    const detail = await emailResponse.text().catch(() => "");
+    throw new Error(`EmailJS HTTP ${emailResponse.status}${detail ? `: ${detail}` : ""}`);
+  }
+  return true;
+}
+
+async function notifyInstructorDecision(instructor, decision) {
+  if (!instructor?.email?.trim()) return false;
+  const approved = decision === "approved";
+  const suspended = decision === "suspended";
+  const recipient = instructor.email.trim();
+  const message = approved
+    ? `Your instructor access request has been approved. Your instructor ID is ${instructor.instructorId || "being assigned"}. You can now sign in to LewisSee.`
+    : suspended
+      ? "Your LewisSee instructor account has been suspended. Please contact an administrator for assistance."
+      : "Your instructor access request has been denied.";
+
+  await sendAdminEmailJs({
+    to_email: recipient,
+    recipient_email: recipient,
+    email: recipient,
+    to_name: instructor.name,
+    reply_to: recipient,
+    instructor_name: instructor.name,
+    decision,
+    status: approved ? "active" : suspended ? "suspended" : "rejected",
+    instructor_id: instructor.instructorId || "",
+    message,
+    reason: instructor.rejectionReason || "",
+  });
+  return true;
+}
+
+async function notifyInstructorUpdate(instructor, changedFields) {
+  if (!instructor?.email?.trim() || !changedFields?.length) return false;
+  const recipient = instructor.email.trim();
+  await sendAdminEmailJs({
+    to_email: recipient,
+    recipient_email: recipient,
+    email: recipient,
+    to_name: instructor.name,
+    reply_to: recipient,
+    instructor_name: instructor.name,
+    instructor_id: instructor.instructorId || "",
+    decision: "updated",
+    status: instructor.status,
+    reason: "",
+    changed_fields: changedFields.join(", "),
+    message: `An administrator updated your instructor account: ${changedFields.join(", ")}. Contact your administrator if you did not expect this change.`,
+  });
+  return true;
+}
+
+async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
   try {
     const [admins] = await pool.execute(
       "SELECT email FROM admins WHERE role = 'admin' AND email <> ''",
@@ -27,36 +96,23 @@ async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
       .join(", ") || "None selected";
     const results = await Promise.all(admins.map(async (admin) => {
       try {
-        const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            service_id: serviceId,
-            template_id: templateId,
-            user_id: publicKey,
-            template_params: {
-              to_email: admin.email,
-              recipient_email: admin.email,
-              email: admin.email,
-              to_name: "Administrator",
-              instructor_name: instructor.name,
-              instructor_email: instructor.email,
-              decision: "pending",
-              status: "pending",
-              instructor_id: "",
-              requested_blocks: requestedBlocks,
-              reply_to: instructor.email,
-              message: `${instructor.name} (${instructor.email}) submitted a new instructor access request. Requested blocks: ${requestedBlocks}. Review it in the LewisSee admin console.`,
-            },
-          }),
+        await sendAdminEmailJs({
+          to_email: admin.email,
+          recipient_email: admin.email,
+          email: admin.email,
+          to_name: "Administrator",
+          instructor_name: instructor.name,
+          instructor_email: instructor.email,
+          decision: "pending",
+          status: "pending",
+          instructor_id: "",
+          requested_blocks: requestedBlocks,
+          reply_to: instructor.email,
+          message: `${instructor.name} (${instructor.email}) submitted a new instructor access request. Requested blocks: ${requestedBlocks}. Review it in the LewisSee admin console.`,
         });
-        if (!emailResponse.ok) {
-          console.warn(`EmailJS instructor request notice failed with HTTP ${emailResponse.status}.`);
-          return false;
-        }
         return true;
       } catch (error) {
-        console.warn("EmailJS instructor request notice could not reach EmailJS.", error?.message || error);
+        console.warn("EmailJS instructor request notice failed.", error?.message || error);
         return false;
       }
     }));
@@ -254,13 +310,22 @@ async function handleAdmin(req, res, path, pool) {
         message: "Provide a name, an instructor ID in C-YYYY-NNN format, and an optional password of 8–128 characters.",
       });
     }
-    const [existing] = await pool.execute("SELECT instructor_id FROM instructors WHERE uid = ?", [uid]);
+    const [existing] = await pool.execute(
+      "SELECT instructor_id, name FROM instructors WHERE uid = ?",
+      [uid],
+    );
     if (!existing.length) return respond(res, 404, { message: "Instructor was not found." });
     const [duplicate] = await pool.execute(
       "SELECT uid FROM instructors WHERE instructor_id = ? AND uid <> ?",
       [instructorId, uid],
     );
     if (duplicate.length) return respond(res, 409, { message: "That instructor ID is already in use." });
+
+    const previous = existing[0];
+    const changedFields = [];
+    if (name !== String(previous.name || "").trim().replace(/\s+/g, " ")) changedFields.push("name");
+    if (instructorId !== String(previous.instructor_id || "").toUpperCase()) changedFields.push("instructor ID");
+    if (newPassword) changedFields.push("password");
 
     const values = [name, instructorId];
     let updateSql = "UPDATE instructors SET name = ?, instructor_id = ?";
@@ -283,7 +348,24 @@ async function handleAdmin(req, res, path, pool) {
        FROM instructors WHERE uid = ?`,
       [uid],
     );
-    return respond(res, 200, { instructor: serializeInstructor(updatedRows[0]), message: "Instructor details updated." });
+    const updatedInstructor = serializeInstructor(updatedRows[0]);
+
+    let emailSent = false;
+    let emailError = "";
+    if (changedFields.length) {
+      try {
+        emailSent = await notifyInstructorUpdate(updatedInstructor, changedFields);
+      } catch (error) {
+        emailError = error?.message || "EmailJS error.";
+        console.warn("EmailJS instructor update notice failed.", emailError);
+      }
+    }
+    return respond(res, 200, {
+      instructor: updatedInstructor,
+      message: "Instructor details updated.",
+      emailSent,
+      emailError,
+    });
   }
   if (decision === "delete" && req.method === "DELETE") {
     const [result] = await pool.execute("DELETE FROM instructors WHERE uid = ?", [uid]);
@@ -323,7 +405,17 @@ async function handleAdmin(req, res, path, pool) {
      FROM instructors WHERE uid = ?`,
     [uid],
   );
-  return respond(res, 200, { instructor: serializeInstructor(updatedRows[0]), message });
+  const updatedInstructor = serializeInstructor(updatedRows[0]);
+  const emailDecision = decision === "approve" ? "approved" : decision === "reject" ? "rejected" : "suspended";
+  let emailSent = false;
+  let emailError = "";
+  try {
+    emailSent = await notifyInstructorDecision(updatedInstructor, emailDecision);
+  } catch (error) {
+    emailError = error?.message || "EmailJS error.";
+    console.warn("EmailJS instructor decision notice failed.", emailError);
+  }
+  return respond(res, 200, { instructor: updatedInstructor, message, emailSent, emailError });
 }
 
 async function handleInstructorAuth(req, res, action, pool) {
