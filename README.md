@@ -50,18 +50,6 @@ The interface responds to user and browser events to keep attendance workflows i
 - **Liveness limitations:** Anti-spoofing reduces the risk of a still-image check-in but cannot guarantee detection of every advanced replay or deepfake.
 - **Biometric privacy:** Student reference photos and face descriptors are sensitive data. Limit access to authorized staff and protect the database and API credentials.
 
-## 🚀 Production Deployment
-
-The Vercel deployment serves the Vite frontend and its Node.js admin/auth functions. The Python service in `liveness-server` must run separately because it provides both the `/attendance` API and the `/liveness` check. `render.yaml` configures this service for Render; it uses the same MySQL database as the admin functions.
-
-1. Deploy this repository to Vercel using the repository root as the project root, the default `npm run build` command, and `dist` as the output directory.
-2. Deploy `liveness-server` to Render with the included `render.yaml`. Set `DB_PASSWORD` and `ADMIN_JWT_SECRET` in the Render service environment, along with the database settings required by your MySQL provider. The service URL must be public HTTPS; verify `https://<service-host>/health` responds before connecting the frontend.
-3. In **Vercel → Project → Settings → Environment Variables**, set `VITE_LIVENESS_API_URL` to the Render service's public HTTPS URL ending in `/liveness` (for example `https://<your-render-service>.onrender.com/liveness`) for every environment you use, then redeploy. The app derives `/attendance` from this URL automatically. If attendance is hosted separately, set `VITE_ATTENDANCE_API_URL` to its full HTTPS `/attendance` endpoint too. Never use `localhost` or `127.0.0.1` for a hosted build.
-4. The Render configuration allows `vercel.app` origins. For a Vercel custom domain or GitHub Pages, set Render's `LIVENESS_CORS_ORIGINS` to a comma-separated list of the exact site origins (scheme and host, no trailing slash), for example `https://your-domain.example,https://your-user.github.io`.
-5. To deploy via GitHub Pages instead, set the repository's **Settings → Secrets and variables → Actions → Variables** entry `VITE_LIVENESS_API_URL` to the same HTTPS `/liveness` endpoint. `VITE_ATTENDANCE_API_URL` is optional unless attendance uses another host. Ensure GitHub Pages is enabled for the repository; pushing `main` then triggers the included Pages workflow.
-
-Do not use a `127.0.0.1` or `localhost` API URL in a hosted build: on another device, that address points to that device itself. Keep database passwords and JWT secrets in the backend provider's secret environment, never in `VITE_*` variables.
-
 ## 👥 About the Creators
 
 LewisSee was developed by Group 7 for The Lewis College. The team members contributed in the following areas:
