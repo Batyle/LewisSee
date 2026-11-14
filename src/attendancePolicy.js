@@ -54,6 +54,30 @@ export const formatClock12Hour = (value) => {
   return `${hour12}:${minute}${seconds ? `:${seconds}` : ""} ${hour24 < 12 ? "AM" : "PM"}`;
 };
 
+export const formatEmailDate = (value) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? "").trim());
+  if (!match) return String(value ?? "");
+  const date = new Date(`${match[1]}-${match[2]}-${match[3]}T12:00:00+08:00`);
+  if (Number.isNaN(date.getTime())) return String(value);
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: MANILA_TZ,
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  }).formatToParts(date);
+  const part = (type) => parts.find((item) => item.type === type)?.value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+};
+
+export const formatEmailTime = (value) => {
+  const minutes = parseClockToMinutes(value);
+  if (minutes == null) return String(value ?? "");
+  const hour24 = Math.floor(minutes / 60);
+  const hour12 = hour24 % 12 || 12;
+  const minute = String(minutes % 60).padStart(2, "0");
+  return `${hour12}:${minute}${hour24 < 12 ? "am" : "pm"}`;
+};
+
 const clockAtMinutes = (minutes) => {
   const normalized = ((minutes % 1440) + 1440) % 1440;
   return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
