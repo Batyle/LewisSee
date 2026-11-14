@@ -4,6 +4,7 @@ import { randomInt, randomUUID } from "node:crypto";
 import { listBlocks } from "./_lib/blocks.js";
 import { getDatabaseErrorMessage } from "./_lib/databaseErrorMessage.js";
 import { getPool } from "./_lib/database.js";
+import { sendWithRetry } from "../src/api/emailRetry.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const respond = (res, code, body) => res.status(code).json(body);
@@ -25,23 +26,28 @@ function resolveEmailJsOrigin(req) {
 }
 
 async function sendAdminEmailJs(templateParams, req) {
-  const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Origin: resolveEmailJsOrigin(req),
-    },
-    body: JSON.stringify({
-      service_id: ADMIN_EMAILJS_SERVICE_ID,
-      template_id: ADMIN_EMAILJS_TEMPLATE_ID,
-      user_id: ADMIN_EMAILJS_PUBLIC_KEY,
-      template_params: templateParams,
-    }),
-  });
-  if (!emailResponse.ok) {
-    const detail = await emailResponse.text().catch(() => "");
-    throw new Error(`EmailJS HTTP ${emailResponse.status}${detail ? `: ${detail}` : ""}`);
-  }
+  await sendWithRetry(async () => {
+    const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Origin: resolveEmailJsOrigin(req),
+      },
+      body: JSON.stringify({
+        service_id: ADMIN_EMAILJS_SERVICE_ID,
+        template_id: ADMIN_EMAILJS_TEMPLATE_ID,
+        user_id: ADMIN_EMAILJS_PUBLIC_KEY,
+        template_params: templateParams,
+      }),
+    });
+    if (!emailResponse.ok) {
+      const detail = await emailResponse.text().catch(() => "");
+      const error = new Error(`EmailJS HTTP ${emailResponse.status}${detail ? `: ${detail}` : ""}`);
+      error.status = emailResponse.status;
+      throw error;
+    }
+    return emailResponse;
+  }, { maxAttempts: 3 });
   return true;
 }
 

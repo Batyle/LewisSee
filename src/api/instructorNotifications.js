@@ -1,4 +1,5 @@
 import emailjs from "@emailjs/browser";
+import { sendWithRetry } from "./emailRetry.js";
 
 // Authoritative admin → instructor EmailJS credentials (do not let stale Vercel env override these).
 export const ADMIN_EMAILJS_SERVICE_ID = "service_42lrlwk";
@@ -37,11 +38,13 @@ export async function sendInstructorDecisionEmail(instructor, decision) {
     throw new Error("The instructor account has no email address.");
   }
 
-  return emailjs.send(
-    ADMIN_EMAILJS_SERVICE_ID,
-    ADMIN_EMAILJS_TEMPLATE_ID,
-    buildDecisionParams(instructor, decision),
-    { publicKey: ADMIN_EMAILJS_PUBLIC_KEY },
+  return sendWithRetry(
+    () => emailjs.send(
+      ADMIN_EMAILJS_SERVICE_ID,
+      ADMIN_EMAILJS_TEMPLATE_ID,
+      buildDecisionParams(instructor, decision),
+      { publicKey: ADMIN_EMAILJS_PUBLIC_KEY },
+    ),
   );
 }
 
@@ -52,24 +55,26 @@ export async function sendInstructorUpdateEmail(instructor, changedFields, passw
   const recipient = instructor.email.trim();
   const replyTo = import.meta.env.VITE_ADMIN_NOTIFICATION_REPLY_TO?.trim() || recipient;
 
-  return emailjs.send(
-    ADMIN_EMAILJS_SERVICE_ID,
-    ADMIN_EMAILJS_TEMPLATE_ID,
-    {
-      to_email: recipient,
-      recipient_email: recipient,
-      to_name: instructor.name,
-      email: recipient,
-      reply_to: replyTo,
-      instructor_name: instructor.name,
-      instructor_id: instructor.instructorId || "",
-      password: password || "Unchanged — use your existing password",
-      decision: "updated",
-      status: instructor.status,
-      reason: "",
-      changed_fields: changedFields.join(", "),
-      message: `An administrator updated your instructor account: ${changedFields.join(", ")}. Contact your administrator if you did not expect this change.`,
-    },
-    { publicKey: ADMIN_EMAILJS_PUBLIC_KEY },
+  return sendWithRetry(
+    () => emailjs.send(
+      ADMIN_EMAILJS_SERVICE_ID,
+      ADMIN_EMAILJS_TEMPLATE_ID,
+      {
+        to_email: recipient,
+        recipient_email: recipient,
+        to_name: instructor.name,
+        email: recipient,
+        reply_to: replyTo,
+        instructor_name: instructor.name,
+        instructor_id: instructor.instructorId || "",
+        password: password || "Unchanged — use your existing password",
+        decision: "updated",
+        status: instructor.status,
+        reason: "",
+        changed_fields: changedFields.join(", "),
+        message: `An administrator updated your instructor account: ${changedFields.join(", ")}. Contact your administrator if you did not expect this change.`,
+      },
+      { publicKey: ADMIN_EMAILJS_PUBLIC_KEY },
+    ),
   );
 }

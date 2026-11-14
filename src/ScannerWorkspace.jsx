@@ -22,6 +22,7 @@ import {
   isAttendancePolicyReady,
   liveAttendancePhaseAt,
   nowManilaTime,
+  parseClockToMinutes,
   sessionTimeRanges,
   todayManila,
 } from "./attendancePolicy";
@@ -47,6 +48,17 @@ const DEFAULT_CLASSES = [
   { course: "BSCS", yearLevel: 2, block: "A" },
 ];
 const today = () => todayManila();
+const isValidDate = (value) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+};
+const attendanceIdentity = (record) =>
+  JSON.stringify([
+    String(record.studentId || "").trim().toLowerCase(),
+    String(record.date || "").trim(),
+    String(record.section || "").trim().toLowerCase(),
+  ]);
 const cloneSessionForDate = (session, nextDate) => {
   if (!session) return null;
   return {
@@ -233,10 +245,11 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     if (editFilePreviewUrl.current) URL.revokeObjectURL(editFilePreviewUrl.current);
   }, []);
   const [theme, setTheme] = useState(getTheme),
-    [online, setOnline] = useState(true),
+    [online, setOnline] = useState(() => navigator.onLine),
     [connection, setConnection] = useState("standby"),
     [notifications, setNotifications] = useState([]),
     [systemAlert, setSystemAlert] = useState(""),
+    [apiRetryStatus, setApiRetryStatus] = useState(""),
     [debug, setDebug] = useState({ fps: 0, ms: 0 });
   const access = "granted";
   const [accessError, setAccessError] = useState(""),
@@ -277,10 +290,18 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   useEffect(() => {
     if (access !== "granted") return undefined;
     let cancelled = false;
+    const controller = new AbortController();
     setCloudLoaded(false);
-    void loadAttendanceStore()
+    void loadAttendanceStore({
+      signal: controller.signal,
+      onRetry: (cause) => {
+        if (!cancelled) setApiRetryStatus(`${cause.message} Retrying automatically…`);
+      },
+    })
       .then((value) => {
         if (cancelled) return;
+        setApiRetryStatus("");
+        setAccessError("");
         const next = {
           students: Array.isArray(value.students) ? value.students : [],
           records: Array.isArray(value.records) ? value.records : [],
@@ -304,24 +325,40 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         setCloudLoaded(true);
       })
       .catch((cause) => {
-        if (cancelled) return;
+        if (cancelled || cause.name === "AbortError") return;
+        setApiRetryStatus("");
         const message = cause.message || "Could not load the MySQL attendance store.";
         setAccessError(message);
         showError(message);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
   }, [access, showError]);
   useEffect(() => {
     if (!cloudLoaded || access !== "granted") return;
+    let active = true;
     const next = { students, records, classes: activeClasses, sessions },
       serialized = JSON.stringify(next);
     if (serialized === lastCloudValue.current) return;
     lastCloudValue.current = serialized;
-    saveAttendanceStore(next).catch((cause) => {
-      const message = cause.message || "Could not save changes to the MySQL attendance store.";
-      setAccessError(message);
-      showError(message);
-    });
+    void saveAttendanceStore(next, {
+      onRetry: (cause) => {
+        if (active) setApiRetryStatus(`${cause.message} Retrying automatically…`);
+      },
+    })
+      .then(() => {
+        if (active) setApiRetryStatus("");
+      })
+      .catch((cause) => {
+        if (!active || cause.name === "AbortError") return;
+        setApiRetryStatus("");
+        const message = cause.message || "Could not save changes to the MySQL attendance store.";
+        setAccessError(message);
+        showError(message);
+      });
+    return () => { active = false; };
   }, [access, activeClasses, cloudLoaded, records, sessions, showError, students]);
   useEffect(() => {
     applyTheme(theme);
@@ -546,12 +583,13 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     const scanTime = nowManilaTime();
     const phase = liveAttendancePhaseAt(scanTime, currentSession);
     if (!phase) return;
-    const attendanceKey = `${scanDate}|${scanSection}|${student.studentId}`;
+    const attendanceKey = JSON.stringify([
+      String(student.studentId || "").trim().toLowerCase(),
+      scanDate,
+      String(scanSection || "").trim().toLowerCase(),
+    ]);
     const existingRecord = scanRecords.find(
-      (record) =>
-        record.studentId === student.studentId &&
-        record.date === scanDate &&
-        record.section === scanSection,
+      (record) => attendanceIdentity(record) === attendanceKey,
     );
     if (phase === "TimeOut") {
       const actionKey = `out|${attendanceKey}`;
@@ -593,8 +631,22 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     if (!emailedRecords.current.has(record.id)) {
       emailedRecords.current.add(record.id);
       const attendancePhoto = frame.toDataURL("image/jpeg", 0.65);
-      void sendAttendanceEmail(student, record, attendancePhoto)
+      const retryNotificationId = `email-retry-${record.id}`;
+      const clearRetryNotification = () =>
+        setNotifications((items) => items.filter((item) => item.id !== retryNotificationId));
+      void sendAttendanceEmail(student, record, attendancePhoto, {
+        onRetry: (_error, attempt) => {
+          setNotifications((items) => [
+            {
+              id: retryNotificationId,
+              message: `Email delivery is waiting for a connection; retrying (${attempt}).`,
+            },
+            ...items.filter((item) => item.id !== retryNotificationId),
+          ].slice(0, 4));
+        },
+      })
         .then((sent) => {
+          clearRetryNotification();
           if (sent) {
             const notificationId = `email-${record.id}`;
             setNotifications((items) =>
@@ -613,6 +665,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           }
         })
         .catch((error) => {
+          clearRetryNotification();
           const notificationId = `email-error-${record.id}`;
           setNotifications((items) =>
             [
@@ -631,7 +684,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     }
   }, [ensureLiveSessionDate]);
   const clearAttendanceActions = (record) => {
-    const key = `${record.date}|${record.section}|${record.studentId}`;
+    const key = attendanceIdentity(record);
     attendanceActions.current.delete(`in|${key}`);
     attendanceActions.current.delete(`out|${key}`);
   };
@@ -1141,7 +1194,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   };
   const saveHistoryRecord = (event) => {
     event.preventDefault();
-    const student = students.find((item) => item.studentId === historyDraft.studentId);
+    const student = students.find(
+      (item) => String(item.studentId).trim().toLowerCase() === String(historyDraft.studentId).trim().toLowerCase(),
+    );
     const sectionValue = historyDraft.section.trim();
     const policy = sessions.find(
       (item) => item.section === sectionValue && item.date === historyDraft.date,
@@ -1154,22 +1209,35 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       time: historyDraft.time.trim(),
       section: sectionValue,
       timeOut: historyDraft.timeOut?.trim() || null,
-      status: policy
-        ? policy.mode === "manual"
-          ? "Present"
-          : determineAttendanceStatus(
-            historyDraft.time.trim(),
-            policyRanges.timeInStart,
-            policyRanges.timeInEnd,
-            policyRanges.lateStart,
-            policyRanges.lateEnd,
-          )
-        : "Present",
+      status: "Present",
     };
-    if (!next.studentId || !next.date || !next.time || !next.section)
+    if (!student || !next.date || !next.time || !next.section)
       return setNotice("Choose a student, date, time, and section.");
-    if (records.some((item) => item.studentId === next.studentId && item.date === next.date && item.section === next.section && item.id !== historyEditingId))
+    if (!isValidDate(next.date))
+      return setNotice("Choose a valid attendance date.");
+    if (records.some((item) => attendanceIdentity(item) === attendanceIdentity(next) && item.id !== historyEditingId))
       return setNotice("This student already has attendance for that class and date.");
+    const timeInMinutes = parseClockToMinutes(next.time);
+    if (timeInMinutes == null)
+      return setNotice("Enter a valid time-in.");
+    if (next.timeOut && (
+      parseClockToMinutes(next.timeOut) == null ||
+      parseClockToMinutes(next.timeOut) <= timeInMinutes
+    ))
+      return setNotice("Time-out must be later than time-in.");
+    if (policy && policy.mode !== "manual") {
+      try {
+        next.status = determineAttendanceStatus(
+          next.time,
+          policyRanges.timeInStart,
+          policyRanges.timeInEnd,
+          policyRanges.lateStart,
+          policyRanges.lateEnd,
+        );
+      } catch (cause) {
+        return setNotice(cause.message || "The attendance policy for this class and date is invalid.");
+      }
+    }
     if (historyEditingId) {
       const previous = records.find((item) => item.id === historyEditingId);
       if (previous) clearAttendanceActions(previous);
@@ -1283,7 +1351,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   if (!startupDismissed && !cloudLoaded) {
     return (
       <LoadingScreen
-        message="Loading attendance records…"
+        message={apiRetryStatus
+          ? `Waiting for the attendance API. ${apiRetryStatus}`
+          : "Loading attendance records…"}
         steps={[{ label: "Attendance data", status: accessError ? "error" : "loading" }]}
         error={accessError}
         onContinue={accessError ? () => {
@@ -1297,7 +1367,12 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     <main className={`attendance-app${embedded ? " attendance-app-embedded" : ""}`}>
       {!online && (
         <div className="offline-banner">
-          Internet connection lost — notifications paused
+          Internet connection lost — attendance changes will sync automatically when reconnected.
+        </div>
+      )}
+      {online && apiRetryStatus && (
+        <div className="offline-banner" role="status" aria-live="polite">
+          Attendance API reconnecting — {apiRetryStatus}
         </div>
       )}
       {systemAlert && (

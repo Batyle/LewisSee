@@ -21,18 +21,19 @@ const request = async (path, options = {}) => {
     );
   }
   const body = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(body.message || body.detail || "Unable to complete the request.");
+  if (!response.ok) {
+    const error = new Error(body.message || body.detail || "Unable to complete the request.");
+    error.status = response.status;
+    throw error;
+  }
   return body;
 };
 
 export async function signInAdmin(email, password) {
   const normalizedEmail = email.trim();
-  const loginEmail = normalizedEmail.toLowerCase() === "admin"
-    ? "admin@lewissee.local"
-    : normalizedEmail;
   const response = await request("/login", {
     method: "POST",
-    body: JSON.stringify({ email: loginEmail, password }),
+    body: JSON.stringify({ email: normalizedEmail, password }),
   });
   localStorage.setItem(tokenKey, response.token);
   return response.admin;

@@ -45,10 +45,6 @@ function clearInstructorSession() {
 }
 
 async function signInInstructor(email, password) {
-  if (email === "employee" && password === "employee123") {
-    return { token: "local-test-instructor", instructor: { name: "Employee", email: "employee" } };
-  }
-
   let response;
   try {
     response = await fetch(getInstructorApiUrl("/instructor-auth/login"), {
@@ -363,11 +359,6 @@ export default function InstructorAccess() {
           {!busy && <SubmitArrow />}
         </button>
 
-        {mode === "login" && (
-          <p className="access-note">
-            Local test — admin: <b>admin</b> / <b>admin123</b> · instructor: <b>employee</b> / <b>employee123</b>
-          </p>
-        )}
       </form>
       <p className="access-switch">
         {mode === "login" ? "Need instructor access?" : "Already have an account?"}

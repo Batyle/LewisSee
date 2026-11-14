@@ -29,9 +29,35 @@ function formatTimeHhmm(value) {
   return minutes == null ? null : clockAtMinutes(minutes);
 }
 
+function isValidCalendarDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(`${value}T00:00:00.000Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function validationError(message) {
+  const error = new Error(message);
+  error.statusCode = 422;
+  return error;
+}
+
+function requireObjectRows(rows, label) {
+  if (rows.some((row) => !row || typeof row !== "object" || Array.isArray(row))) {
+    throw validationError(`${label} must contain valid objects.`);
+  }
+  return rows;
+}
+
 function sessionTimeRanges(session) {
   if (session.mode === "manual") {
-    return { timeInStart: null, timeInEnd: null, lateStart: null, lateEnd: null };
+    return {
+      timeInStart: null,
+      timeInEnd: null,
+      lateStart: null,
+      lateEnd: null,
+      timeOutStart: null,
+      timeOutEnd: null,
+    };
   }
   const timeInStart = session.timeInStart || session.requiredTimeIn;
   const start = parseClockToMinutes(timeInStart);
@@ -51,7 +77,14 @@ function sessionTimeRanges(session) {
       : session.lateThresholdMinutes == null
         ? "23:59"
         : clockAtMinutes(start + Math.max(0, Number(session.lateThresholdMinutes) || 0)));
-  return { timeInStart, timeInEnd, lateStart, lateEnd };
+  return {
+    timeInStart,
+    timeInEnd,
+    lateStart,
+    lateEnd,
+    timeOutStart: session.timeOutStart || session.timeOut || null,
+    timeOutEnd: session.timeOutEnd || null,
+  };
 }
 
 function determineAttendanceStatus(currentScanTime, timeInStart, timeInEnd, lateStart = null, lateEnd = null) {
@@ -288,11 +321,24 @@ export async function loadAttendanceStore(pool) {
 
 export async function replaceAttendanceStore(pool, storeInput) {
   const store = {
-    students: Array.isArray(storeInput?.students) ? storeInput.students : [],
-    records: Array.isArray(storeInput?.records) ? storeInput.records : [],
-    classes: Array.isArray(storeInput?.classes) ? storeInput.classes : [],
-    sessions: Array.isArray(storeInput?.sessions) ? storeInput.sessions : [],
+    students: requireObjectRows(Array.isArray(storeInput?.students) ? storeInput.students : [], "Students"),
+    records: requireObjectRows(Array.isArray(storeInput?.records) ? storeInput.records : [], "Attendance records"),
+    classes: requireObjectRows(Array.isArray(storeInput?.classes) ? storeInput.classes : [], "Classes"),
+    sessions: requireObjectRows(Array.isArray(storeInput?.sessions) ? storeInput.sessions : [], "Attendance sessions"),
   };
+  store.students = store.students.map((student) => ({
+    ...student,
+    studentId: String(student.studentId || "").trim(),
+  }));
+  store.records = store.records.map((record) => ({
+    ...record,
+    id: String(record.id || "").trim(),
+    studentId: String(record.studentId || "").trim(),
+    section: String(record.section || "").trim(),
+    date: String(record.date || "").trim(),
+    time: String(record.time || "").trim(),
+    timeOut: String(record.timeOut || "").trim() || null,
+  }));
 
   if (!store.classes.length) {
     const seen = new Set();
@@ -331,9 +377,38 @@ export async function replaceAttendanceStore(pool, storeInput) {
     if (email) studentEmails.add(email);
   }
 
+  const recordIds = new Set();
+  const attendanceKeys = new Set();
   for (const record of store.records) {
-    if (!studentIds.has(String(record.studentId || "").toLowerCase())) {
+    const recordId = record.id.toLowerCase();
+    const studentId = record.studentId.toLowerCase();
+    const section = record.section.toLowerCase();
+    const key = JSON.stringify([studentId, record.date, section]);
+    if (!recordId || recordId.length > 64 || !section) {
+      const error = new Error("Every attendance record needs a valid ID and class.");
+      error.statusCode = 422;
+      throw error;
+    }
+    if (recordIds.has(recordId)) {
+      const error = new Error("Duplicate attendance record IDs are not allowed.");
+      error.statusCode = 422;
+      throw error;
+    }
+    if (attendanceKeys.has(key)) {
+      const error = new Error("A student can only have one attendance record per class and day.");
+      error.statusCode = 422;
+      throw error;
+    }
+    recordIds.add(recordId);
+    attendanceKeys.add(key);
+
+    if (!studentIds.has(studentId)) {
       const error = new Error("Attendance records must belong to an enrolled student.");
+      error.statusCode = 422;
+      throw error;
+    }
+    if (!isValidCalendarDate(record.date)) {
+      const error = new Error("Each attendance record needs a valid date.");
       error.statusCode = 422;
       throw error;
     }
@@ -347,11 +422,25 @@ export async function replaceAttendanceStore(pool, storeInput) {
       error.statusCode = 422;
       throw error;
     }
+    if (record.timeOut && parseClockToMinutes(record.timeOut) <= parseClockToMinutes(record.time)) {
+      const error = new Error("Attendance record time-out must be later than time-in.");
+      error.statusCode = 422;
+      throw error;
+    }
   }
 
   const classKeys = store.classes.map(
     (item) => `${String(item.course || "").trim().toLowerCase()}|${item.yearLevel}|${String(item.block || "").trim().toLowerCase()}`,
   );
+  if (store.classes.some((item) =>
+    !String(item.course || "").trim() ||
+    String(item.course).trim().length > 64 ||
+    !/^[1-8]$/.test(String(item.yearLevel)) ||
+    !String(item.block || "").trim() ||
+    String(item.block).trim().length > 12
+  )) {
+    throw validationError("Each class needs a valid course, year level, and block.");
+  }
   if (new Set(classKeys).size !== store.classes.length) {
     const error = new Error("Duplicate classes are not allowed.");
     error.statusCode = 422;
@@ -369,6 +458,15 @@ export async function replaceAttendanceStore(pool, storeInput) {
   const sessionKeys = new Set();
   for (const session of store.sessions) {
     const key = `${String(session.section || "").trim().toLowerCase()}|${session.date}`;
+    if (
+      !String(session.id || "").trim() ||
+      String(session.id).trim().length > 64 ||
+      !String(session.section || "").trim() ||
+      String(session.section).trim().length > 191 ||
+      !isValidCalendarDate(String(session.date || ""))
+    ) {
+      throw validationError("Each attendance session needs a valid ID, class, and date.");
+    }
     if (sessionKeys.has(key)) {
       const error = new Error("Duplicate attendance sessions are not allowed.");
       error.statusCode = 422;
@@ -390,6 +488,29 @@ export async function replaceAttendanceStore(pool, storeInput) {
       const error = new Error("Each session needs a valid time-in start and end.");
       error.statusCode = 422;
       throw error;
+    }
+    let attendanceEnd = end;
+    if (ranges.lateStart || ranges.lateEnd) {
+      const lateFrom = parseClockToMinutes(ranges.lateStart);
+      const lateUntil = parseClockToMinutes(ranges.lateEnd);
+      if (lateFrom == null || lateUntil == null || lateFrom <= end || lateUntil < lateFrom) {
+        const error = new Error("Each session needs a valid late period after time-in.");
+        error.statusCode = 422;
+        throw error;
+      }
+      attendanceEnd = lateUntil;
+    }
+    if (ranges.timeOutStart || ranges.timeOutEnd) {
+      const timeOutFrom = parseClockToMinutes(ranges.timeOutStart);
+      const timeOutUntil = parseClockToMinutes(ranges.timeOutEnd);
+      if (
+        timeOutFrom == null || timeOutUntil == null ||
+        timeOutFrom <= attendanceEnd || timeOutUntil <= timeOutFrom
+      ) {
+        const error = new Error("Each session needs a valid time-out period after attendance.");
+        error.statusCode = 422;
+        throw error;
+      }
     }
     sessionKeys.add(key);
   }
