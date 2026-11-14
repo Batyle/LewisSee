@@ -18,7 +18,16 @@ import {
 } from "./detector";
 import { NotificationConnection } from "./connection";
 import { loadAttendanceStore, saveAttendanceStore } from "./attendanceApi";
+import {
+  determineAttendanceStatus,
+  nowManilaTime,
+  todayManila,
+} from "./attendancePolicy";
 import { applyTheme, getTheme, watchSystemTheme } from "./theme";
+import LoadingScreen from "./components/LoadingScreen";
+import LewisSeeLogo from "./components/LewisSeeLogo";
+import SessionPolicyForm from "./components/SessionPolicyForm";
+import AttendanceStatusBadge from "./components/AttendanceStatusBadge";
 import "./App.css";
 import "./ScannerWorkspace.css";
 import "./ScannerRefinement.css";
@@ -34,8 +43,37 @@ const DEFAULT_CLASSES = [
   { course: "BSIT", yearLevel: 3, block: "B" },
   { course: "BSCS", yearLevel: 2, block: "A" },
 ];
-const today = () => new Date().toISOString().slice(0, 10);
+const today = todayManila;
+const formatDate = (value) => {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ""));
+  if (!match) return String(value ?? "");
+
+  const [, year, month, day] = match;
+  const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day)));
+  if (
+    date.getUTCFullYear() !== Number(year) ||
+    date.getUTCMonth() !== Number(month) - 1 ||
+    date.getUTCDate() !== Number(day)
+  ) {
+    return String(value);
+  }
+
+  const monthName = date.toLocaleString("en-US", { month: "long", timeZone: "UTC" });
+  return `${year}-${monthName}-${day}`;
+};
 const normalize = (value) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+const currentStudentIdYear = () => String(new Date().getFullYear());
+const studentIdFields = (studentId = "") => {
+  const match = /^C-(\d{4})-(\d{3})$/.exec(studentId);
+  return {
+    studentIdYear: match?.[1] || currentStudentIdYear(),
+    studentIdNumber: match?.[2] || "",
+  };
+};
+const formatStudentId = ({ studentIdYear, studentIdNumber }) =>
+  `C-${studentIdYear}-${studentIdNumber}`;
+const isValidStudentId = ({ studentIdYear, studentIdNumber }) =>
+  /^\d{4}$/.test(studentIdYear) && /^\d{3}$/.test(studentIdNumber);
 const classLabel = ({ course, yearLevel, block }) =>
   `${course} ${yearLevel}${block}`;
 const belongsToClass = (student, course, yearLevel, block) =>
@@ -154,7 +192,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [ready, setReady] = useState(false);
   const [students, setStudents] = useState(() => read("attendance-students")),
     [records, setRecords] = useState(() => read("attendance-records")),
-    [classes, setClasses] = useState(() => read("attendance-classes"));
+    [classes, setClasses] = useState(() => read("attendance-classes")),
+    [sessions, setSessions] = useState(() => read("attendance-sessions"));
   const [date, setDate] = useState(today),
     [course, setCourse] = useState("BSIT"),
     [yearLevel, setYearLevel] = useState("3"),
@@ -162,12 +201,12 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [message, setMessage] = useState("Preparing scanner…"),
     [faces, setFaces] = useState(0),
     [match, setMatch] = useState(null);
-  const [form, setForm] = useState({ name: "", studentId: "", email: "", course: "BSIT", yearLevel: "3", block: "A" }),
+  const [form, setForm] = useState({ name: "", ...studentIdFields(), email: "", course: "BSIT", yearLevel: "3", block: "A" }),
     [file, setFile] = useState(null),
     [notice, setNotice] = useState(""),
     [page, setPage] = useState("scan"),
     [newClass, setNewClass] = useState({ course: "", yearLevel: "1", block: "A" }),
-    [historyDraft, setHistoryDraft] = useState({ studentId: "", date: today(), time: "", section: "" }),
+    [historyDraft, setHistoryDraft] = useState({ studentId: "", date: today(), time: "", section: "", timeOut: "" }),
     [historySearch, setHistorySearch] = useState(""),
     [historySectionFilter, setHistorySectionFilter] = useState(""),
     [historySort, setHistorySort] = useState("newest"),
@@ -186,7 +225,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [debug, setDebug] = useState({ fps: 0, ms: 0 });
   const access = "granted";
   const [accessError, setAccessError] = useState(""),
-    [cloudLoaded, setCloudLoaded] = useState(false);
+    [cloudLoaded, setCloudLoaded] = useState(false),
+    [startupDismissed, setStartupDismissed] = useState(false);
   const debugMode = new URLSearchParams(location.search).get("debug") === "1";
   const section = classLabel({ course, yearLevel, block });
   const activeClasses = classes.length ? classes : DEFAULT_CLASSES;
@@ -217,6 +257,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     store("attendance-classes", classes);
   }, [classes]);
   useEffect(() => {
+    store("attendance-sessions", sessions);
+  }, [sessions]);
+  useEffect(() => {
     if (access !== "granted") return undefined;
     let cancelled = false;
     setCloudLoaded(false);
@@ -227,15 +270,22 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           students: Array.isArray(value.students) ? value.students : [],
           records: Array.isArray(value.records) ? value.records : [],
           classes: Array.isArray(value.classes) && value.classes.length ? value.classes : DEFAULT_CLASSES,
+          sessions: Array.isArray(value.sessions) ? value.sessions : [],
         };
         // On a new database, keep local records long enough to migrate them once.
-        const initial = next.students.length || next.records.length
+        const initial = next.students.length || next.records.length || next.sessions.length
           ? next
-          : { students: read("attendance-students"), records: read("attendance-records"), classes: read("attendance-classes") };
+          : {
+              students: read("attendance-students"),
+              records: read("attendance-records"),
+              classes: read("attendance-classes"),
+              sessions: read("attendance-sessions"),
+            };
         lastCloudValue.current = JSON.stringify(next);
         setStudents(initial.students);
         setRecords(initial.records);
         setClasses(initial.classes?.length ? initial.classes : DEFAULT_CLASSES);
+        setSessions(Array.isArray(initial.sessions) ? initial.sessions : []);
         setCloudLoaded(true);
       })
       .catch((cause) => {
@@ -248,7 +298,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   }, [access, showError]);
   useEffect(() => {
     if (!cloudLoaded || access !== "granted") return;
-    const next = { students, records, classes: activeClasses },
+    const next = { students, records, classes: activeClasses, sessions },
       serialized = JSON.stringify(next);
     if (serialized === lastCloudValue.current) return;
     lastCloudValue.current = serialized;
@@ -257,7 +307,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       setAccessError(message);
       showError(message);
     });
-  }, [access, activeClasses, cloudLoaded, records, showError, students]);
+  }, [access, activeClasses, cloudLoaded, records, sessions, showError, students]);
   useEffect(() => {
     applyTheme(theme);
     return watchSystemTheme(theme, () => applyTheme("system"));
@@ -351,6 +401,37 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     setMatch(next.match || null);
     setMessage(next.message);
   }, []);
+  const activeSession = useMemo(
+    () => sessions.find((item) => item.section === section && item.date === date) || null,
+    [date, section, sessions],
+  );
+  const saveSessionPolicy = useCallback((nextSession) => {
+    setSessions((all) => {
+      const index = all.findIndex(
+        (item) => item.section === nextSession.section && item.date === nextSession.date,
+      );
+      if (index >= 0) {
+        const copy = [...all];
+        copy[index] = nextSession;
+        return copy;
+      }
+      return [...all, nextSession];
+    });
+    setRecords((all) =>
+      all.map((record) => {
+        if (record.section !== nextSession.section || record.date !== nextSession.date) return record;
+        return {
+          ...record,
+          status: determineAttendanceStatus(
+            record.time,
+            nextSession.requiredTimeIn,
+            nextSession.gracePeriodMinutes,
+            nextSession.lateThresholdMinutes,
+          ),
+        };
+      }),
+    );
+  }, []);
   const present = useCallback(
     (student) =>
       setRecords((all) => {
@@ -363,16 +444,24 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           )
         )
           return all;
+        const scanTime = nowManilaTime();
+        const status = activeSession
+          ? determineAttendanceStatus(
+              scanTime,
+              activeSession.requiredTimeIn,
+              activeSession.gracePeriodMinutes,
+              activeSession.lateThresholdMinutes,
+            )
+          : "Present";
         const record = {
           id: crypto.randomUUID(),
           studentId: student.studentId,
           name: student.name,
           date,
           section,
-          time: new Date().toLocaleTimeString([], {
-            hour: "2-digit",
-            minute: "2-digit",
-          }),
+          time: scanTime,
+          status,
+          timeOut: null,
         };
         socket.current?.send({ type: "attendance", id: record.id, record });
         if (!emailedRecords.current.has(record.id)) {
@@ -404,7 +493,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         }
         return [...all, record];
       }),
-    [date, section],
+    [activeSession, date, section],
   );
   const loop = useCallback(
     async (now) => {
@@ -558,6 +647,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   const enroll = async (event) => {
     event.preventDefault();
     if (!file) return setNotice("Choose a reference portrait.");
+    if (!isValidStudentId(form))
+      return setNotice("Enter a 4-digit year and a 3-digit student number.");
+    const nextId = formatStudentId(form);
     setEnrolling(true);
     try {
       // Enrollment uses an uploaded portrait, so it must not be blocked when
@@ -575,7 +667,6 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       const result = await detect(canvas);
       if (result.length !== 1)
         throw new Error("The portrait must contain exactly one face.");
-      const nextId = form.studentId.trim();
       const nextName = form.name.trim();
       const nextEmail = form.email.trim();
       if (!nextName || !nextId) throw new Error("Full name and student ID are required.");
@@ -599,7 +690,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           photo,
         },
       ]);
-      setForm({ name: "", studentId: "", email: "", course, yearLevel, block });
+      setForm({ name: "", ...studentIdFields(), email: "", course, yearLevel, block });
       setNotice("Student enrolled.");
       setEnrollmentOpen(false);
     } catch (cause) {
@@ -614,7 +705,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     setEditingId(student.studentId);
     setEditForm({
       name: student.name,
-      studentId: student.studentId,
+      ...studentIdFields(student.studentId),
       email: student.email || "",
       course: student.course || "BSIT",
       yearLevel: String(student.yearLevel || "1"),
@@ -626,9 +717,11 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   const saveEdit = async (event) => {
     event.preventDefault();
     if (!students.some((student) => student.studentId === editingId)) return;
+    if (!isValidStudentId(editForm))
+      return setNotice("Enter a 4-digit year and a 3-digit student number.");
     setSavingEdit(true);
     try {
-      const nextId = editForm.studentId.trim();
+      const nextId = formatStudentId(editForm);
       const nextName = editForm.name.trim();
       const nextEmail = editForm.email.trim();
       if (!nextName || !nextId) throw new Error("Full name and student ID are required.");
@@ -736,12 +829,25 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   const saveHistoryRecord = (event) => {
     event.preventDefault();
     const student = students.find((item) => item.studentId === historyDraft.studentId);
+    const sectionValue = historyDraft.section.trim();
+    const policy = sessions.find(
+      (item) => item.section === sectionValue && item.date === historyDraft.date,
+    );
     const next = {
       studentId: historyDraft.studentId,
       name: student?.name || "",
       date: historyDraft.date,
       time: historyDraft.time.trim(),
-      section: historyDraft.section.trim(),
+      section: sectionValue,
+      timeOut: historyDraft.timeOut?.trim() || null,
+      status: policy
+        ? determineAttendanceStatus(
+            historyDraft.time.trim(),
+            policy.requiredTimeIn,
+            policy.gracePeriodMinutes,
+            policy.lateThresholdMinutes,
+          )
+        : "Present",
     };
     if (!next.studentId || !next.date || !next.time || !next.section)
       return setNotice("Choose a student, date, time, and section.");
@@ -755,11 +861,17 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       setNotice("Attendance record added.");
     }
     setHistoryEditingId(null);
-    setHistoryDraft({ studentId: "", date: today(), time: "", section: section });
+    setHistoryDraft({ studentId: "", date: today(), time: "", section, timeOut: "" });
   };
   const editHistoryRecord = (record) => {
     setHistoryEditingId(record.id);
-    setHistoryDraft({ studentId: record.studentId, date: record.date, time: record.time, section: record.section });
+    setHistoryDraft({
+      studentId: record.studentId,
+      date: record.date,
+      time: record.time,
+      section: record.section,
+      timeOut: record.timeOut || "",
+    });
     setNotice("");
   };
   const deleteHistoryRecord = (record) => {
@@ -799,6 +911,24 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     () => students.filter((student) => belongsToClass(student, course, yearLevel, block)),
     [block, course, students, yearLevel],
   );
+  if (!startupDismissed && (!cloudLoaded || !ready)) {
+    const startupError = [accessError, error].filter(Boolean).join(" ");
+    return (
+      <LoadingScreen
+        message={!cloudLoaded ? "Loading attendance records…" : stage}
+        steps={[
+          { label: "Attendance data", status: accessError ? "error" : cloudLoaded ? "ready" : "loading" },
+          { label: "Camera and face scanner", status: error ? "error" : ready ? "ready" : "loading" },
+        ]}
+        error={startupError}
+        onRetry={error ? start : undefined}
+        onContinue={startupError ? () => {
+          if (!cloudLoaded) setCloudLoaded(true);
+          setStartupDismissed(true);
+        } : undefined}
+      />
+    );
+  }
   return (
     <main className={`attendance-app${embedded ? " attendance-app-embedded" : ""}`}>
       {!online && (
@@ -840,7 +970,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       ) : (
         <header className="topbar">
           <div>
-            <span className="brand-mark small">LS</span>
+            <LewisSeeLogo className="brand-mark small" />
             <span className="brand-name">LewisSee</span>
           </div>
           <div className="header-controls">
@@ -933,6 +1063,13 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           </label>
         </div>
       </section>
+      <SessionPolicyForm
+        section={section}
+        date={date}
+        session={activeSession}
+        onSave={saveSessionPolicy}
+        disabled={!cloudLoaded}
+      />
       <section className="attendance-grid">
         <article className="camera-card">
           <div className="section-title">
@@ -980,10 +1117,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         <article className="records-card">
           <div className="section-title">
             <div>
-              <p className="eyebrow">{date}</p>
+              <p className="eyebrow">{formatDate(date)}</p>
               <h2>Today’s attendance</h2>
             </div>
-            <strong>{attendance.length} present</strong>
+            <strong>{attendance.length} checked in</strong>
           </div>
           <div className="attendance-list">
             {attendance.length ? (
@@ -994,7 +1131,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                     <b>{record.name}</b>
                     <small>{record.studentId}</small>
                   </div>
-                  <time>{record.time}</time>
+                  <div className="record-meta">
+                    <AttendanceStatusBadge status={record.status || "Present"} />
+                    <time>{record.time}</time>
+                  </div>
                 </div>
               ))
             ) : (
@@ -1045,11 +1185,30 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           </label>
           <label>
             Student ID
-            <input
-              required
-              value={form.studentId}
-              onChange={(e) => setForm({ ...form, studentId: e.target.value })}
-            />
+            <div className="student-id-input" role="group" aria-label="Student ID">
+              <span aria-hidden="true">C-</span>
+              <input
+                required
+                aria-label="Student ID year"
+                inputMode="numeric"
+                pattern="[0-9]{4}"
+                maxLength={4}
+                placeholder="2026"
+                value={form.studentIdYear}
+                onChange={(e) => setForm({ ...form, studentIdYear: e.target.value })}
+              />
+              <span aria-hidden="true">-</span>
+              <input
+                required
+                aria-label="Three-digit student number"
+                inputMode="numeric"
+                pattern="[0-9]{3}"
+                maxLength={3}
+                placeholder="781"
+                value={form.studentIdNumber}
+                onChange={(e) => setForm({ ...form, studentIdNumber: e.target.value })}
+              />
+            </div>
           </label>
           <label>
             Email
@@ -1139,13 +1298,34 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
               </label>
               <label>
                 Student ID
-                <input
-                  required
-                  value={editForm.studentId}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, studentId: e.target.value })
-                  }
-                />
+                <div className="student-id-input" role="group" aria-label="Student ID">
+                  <span aria-hidden="true">C-</span>
+                  <input
+                    required
+                    aria-label="Student ID year"
+                    inputMode="numeric"
+                    pattern="[0-9]{4}"
+                    maxLength={4}
+                    placeholder="2026"
+                    value={editForm.studentIdYear}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, studentIdYear: e.target.value })
+                    }
+                  />
+                  <span aria-hidden="true">-</span>
+                  <input
+                    required
+                    aria-label="Three-digit student number"
+                    inputMode="numeric"
+                    pattern="[0-9]{3}"
+                    maxLength={3}
+                    placeholder="781"
+                    value={editForm.studentIdNumber}
+                    onChange={(e) =>
+                      setEditForm({ ...editForm, studentIdNumber: e.target.value })
+                    }
+                  />
+                </div>
               </label>
               <label>
                 Email
@@ -1202,14 +1382,15 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
               </select>
             </label>
             <label>Date<input type="date" value={historyDraft.date} onChange={(event) => setHistoryDraft({ ...historyDraft, date: event.target.value })} required /></label>
-            <label>Time<input type="time" value={historyDraft.time} onChange={(event) => setHistoryDraft({ ...historyDraft, time: event.target.value })} required /></label>
+            <label>Time-in<input type="time" value={historyDraft.time} onChange={(event) => setHistoryDraft({ ...historyDraft, time: event.target.value })} required /></label>
+            <label>Time-out<input type="time" value={historyDraft.timeOut || ""} onChange={(event) => setHistoryDraft({ ...historyDraft, timeOut: event.target.value })} /></label>
             <label>Class / section
               <select value={historyDraft.section} onChange={(event) => setHistoryDraft({ ...historyDraft, section: event.target.value })} required>
                 <option value="">Select class</option>
                 {activeClasses.map((item) => <option key={classLabel(item)} value={classLabel(item)}>{classLabel(item)}</option>)}
               </select>
             </label>
-            <div className="form-actions"><button>{historyEditingId ? "Save record" : "Add record"}</button>{historyEditingId && <button type="button" className="secondary-button" onClick={() => { setHistoryEditingId(null); setHistoryDraft({ studentId: "", date: today(), time: "", section }); }}>Cancel</button>}</div>
+            <div className="form-actions"><button>{historyEditingId ? "Save record" : "Add record"}</button>{historyEditingId && <button type="button" className="secondary-button" onClick={() => { setHistoryEditingId(null); setHistoryDraft({ studentId: "", date: today(), time: "", section, timeOut: "" }); }}>Cancel</button>}</div>
           </form>
           <section className="management-card history-table-card">
             <div className="section-title"><div><p className="eyebrow">SAVED RECORDS</p><h2>{displayedHistory.length} of {records.length} attendance entries</h2></div><button type="button" className="danger-button" disabled={!records.length} onClick={deleteAllHistory}>Delete all</button></div>
@@ -1225,10 +1406,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
               </label>
               {(historySearch || historySectionFilter || historySort !== "newest") && <button type="button" className="secondary-button clear-history-filters" onClick={() => { setHistorySearch(""); setHistorySectionFilter(""); setHistorySort("newest"); }}>Clear filters</button>}
             </div>
-            <div className="history-table-wrap"><table><thead><tr><th>Student</th><th>Date</th><th>Class</th><th>Time</th><th>Actions</th></tr></thead><tbody>
-              {displayedHistory.map((record) => <tr key={record.id}><td><b>{record.name}</b><small>{record.studentId}</small></td><td>{record.date}</td><td>{record.section}</td><td>{record.time}</td><td className="row-actions"><button type="button" className="secondary-button" onClick={() => editHistoryRecord(record)}>Edit</button><button type="button" className="danger-button" onClick={() => deleteHistoryRecord(record)}>Delete</button></td></tr>)}
-              {!records.length && <tr><td colSpan="5" className="empty">No attendance records yet.</td></tr>}
-              {!!records.length && !displayedHistory.length && <tr><td colSpan="5" className="empty">No records match your search or class filter.</td></tr>}
+            <div className="history-table-wrap"><table><thead><tr><th>Student</th><th>Date</th><th>Class</th><th>Time-in</th><th>Status</th><th>Time-out</th><th>Actions</th></tr></thead><tbody>
+              {displayedHistory.map((record) => <tr key={record.id}><td><b>{record.name}</b><small>{record.studentId}</small></td><td>{formatDate(record.date)}</td><td>{record.section}</td><td>{record.time}</td><td><AttendanceStatusBadge status={record.status || "Present"} /></td><td>{record.timeOut || "—"}</td><td className="row-actions"><button type="button" className="secondary-button" onClick={() => editHistoryRecord(record)}>Edit</button><button type="button" className="danger-button" onClick={() => deleteHistoryRecord(record)}>Delete</button></td></tr>)}
+              {!records.length && <tr><td colSpan="7" className="empty">No attendance records yet.</td></tr>}
+              {!!records.length && !displayedHistory.length && <tr><td colSpan="7" className="empty">No records match your search or class filter.</td></tr>}
             </tbody></table></div>
           </section>
         </div>

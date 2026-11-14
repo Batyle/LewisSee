@@ -4,8 +4,12 @@ import {
   listInstructors,
   rejectInstructor,
   suspendInstructor,
+  updateInstructor,
 } from "../api/adminApi";
-import { sendInstructorDecisionEmail } from "../api/instructorNotifications";
+import {
+  sendInstructorDecisionEmail,
+  sendInstructorUpdateEmail,
+} from "../api/instructorNotifications";
 
 const formatBlocks = (blocks = []) => {
   if (!Array.isArray(blocks) || blocks.length === 0) return "No blocks requested";
@@ -32,6 +36,8 @@ export default function Instructors() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busyUid, setBusyUid] = useState("");
+  const [editingInstructor, setEditingInstructor] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", instructorId: "", newPassword: "" });
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -107,6 +113,50 @@ export default function Instructors() {
         }
       }
       setNotice(actionNotice);
+      await load();
+    } catch (cause) {
+      setError(cause.message || "Unable to update this instructor.");
+    } finally {
+      setBusyUid("");
+    }
+  };
+
+  const beginEdit = (person) => {
+    setEditingInstructor(person);
+    setEditForm({ name: person.name, instructorId: person.instructorId || "", newPassword: "" });
+    setError("");
+    setNotice("");
+  };
+
+  const saveInstructor = async (event) => {
+    event.preventDefault();
+    const person = editingInstructor;
+    if (!person) return;
+    setBusyUid(person.uid);
+    setError("");
+    setNotice("");
+    try {
+      const changedFields = [];
+      if (editForm.name.trim() !== person.name) changedFields.push("name");
+      if (editForm.instructorId.trim().toUpperCase() !== (person.instructorId || "")) changedFields.push("instructor ID");
+      if (editForm.newPassword) changedFields.push("password");
+      const result = await updateInstructor(person.uid, {
+        name: editForm.name,
+        instructorId: editForm.instructorId,
+        newPassword: editForm.newPassword,
+      });
+      let actionNotice = result.message || "Instructor details updated.";
+      if (changedFields.length) {
+        try {
+          const emailResponse = await sendInstructorUpdateEmail(result.instructor, changedFields);
+          actionNotice += ` A separate update notification was accepted for ${result.instructor.email} (HTTP ${emailResponse.status}); this does not confirm inbox delivery.`;
+        } catch (cause) {
+          actionNotice += ` The account was updated, but the notification could not be sent: ${cause.message || "EmailJS error."}`;
+        }
+      }
+      setNotice(actionNotice);
+      setEditingInstructor(null);
+      setEditForm({ name: "", instructorId: "", newPassword: "" });
       await load();
     } catch (cause) {
       setError(cause.message || "Unable to update this instructor.");
@@ -233,12 +283,21 @@ export default function Instructors() {
                       {person.name}{" "}
                       <em className={`admin-status admin-status-${person.status}`}>{person.status}</em>
                     </b>
+                    <small>Instructor ID: {person.instructorId || "Assigned on approval"}</small>
                     <small>{person.email}</small>
                     <small>{formatBlocks(person.assignedBlocks)}</small>
                     {person.rejectionReason && <small>Reason: {person.rejectionReason}</small>}
                   </div>
                 </div>
                 <div className="admin-person-actions">
+                  <button
+                    type="button"
+                    className="admin-refresh"
+                    disabled={Boolean(busyUid)}
+                    onClick={() => beginEdit(person)}
+                  >
+                    Edit
+                  </button>
                   {person.status === "active" && (
                     <button
                       type="button"
@@ -265,6 +324,64 @@ export default function Instructors() {
           </ul>
         )}
       </div>
+      {editingInstructor && (
+        <div className="admin-modal-backdrop" role="presentation">
+          <form className="admin-card admin-instructor-edit" onSubmit={saveInstructor}>
+            <div className="admin-section-head">
+              <div>
+                <h2>Edit instructor</h2>
+                <p>Changes will be saved. If any details change, a separate notification will be emailed to this instructor.</p>
+              </div>
+              <button
+                type="button"
+                className="admin-refresh"
+                disabled={Boolean(busyUid)}
+                onClick={() => setEditingInstructor(null)}
+              >
+                Close
+              </button>
+            </div>
+            <label>
+              Name
+              <input
+                required
+                maxLength={255}
+                value={editForm.name}
+                onChange={(event) => setEditForm({ ...editForm, name: event.target.value })}
+              />
+            </label>
+            <label>
+              Instructor ID
+              <input
+                required
+                pattern="C-[0-9]{4}-[0-9]{3}"
+                placeholder="C-2026-781"
+                value={editForm.instructorId}
+                onChange={(event) => setEditForm({ ...editForm, instructorId: event.target.value })}
+              />
+            </label>
+            <label>
+              New password
+              <input
+                type="password"
+                minLength={8}
+                maxLength={128}
+                autoComplete="new-password"
+                placeholder="Leave blank to keep the current password"
+                value={editForm.newPassword}
+                onChange={(event) => setEditForm({ ...editForm, newPassword: event.target.value })}
+              />
+            </label>
+            <small className="admin-instructor-edit-note">For security, the password is hashed and never included in the email. Let the instructor know their new password through a secure channel.</small>
+            <div className="admin-person-actions">
+              <button type="button" className="admin-refresh" disabled={Boolean(busyUid)} onClick={() => setEditingInstructor(null)}>Cancel</button>
+              <button type="submit" className="admin-action-approve" disabled={Boolean(busyUid)}>
+                {busyUid ? "Saving…" : "Save and notify"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </section>
   );
 }

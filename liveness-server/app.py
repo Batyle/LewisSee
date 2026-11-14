@@ -11,11 +11,13 @@ import os
 import sys
 import json
 import re
+import secrets
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta, time, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import bcrypt
 import cv2
@@ -94,6 +96,8 @@ class AttendanceRecord(BaseModel):
     date: str = Field(min_length=10, max_length=10)
     section: str = Field(min_length=1, max_length=191)
     time: str = Field(min_length=1, max_length=32)
+    status: str = Field(default="Present", pattern=r"^(Present|Late|Absent)$")
+    timeOut: str | None = Field(default=None, max_length=32)
 
 
 class ClassGroup(BaseModel):
@@ -102,10 +106,111 @@ class ClassGroup(BaseModel):
     block: str = Field(min_length=1, max_length=12)
 
 
+class AttendanceSession(BaseModel):
+    id: str = Field(min_length=1, max_length=64)
+    section: str = Field(min_length=1, max_length=191)
+    date: str = Field(min_length=10, max_length=10)
+    requiredTimeIn: str = Field(min_length=4, max_length=8)
+    gracePeriodMinutes: int | None = Field(default=None, ge=0, le=240)
+    lateThresholdMinutes: int | None = Field(default=None, ge=0, le=720)
+    timeOut: str | None = Field(default=None, max_length=8)
+
+
 class AttendanceStore(BaseModel):
     students: list[Student]
     records: list[AttendanceRecord]
     classes: list[ClassGroup] = Field(default_factory=list)
+    sessions: list[AttendanceSession] = Field(default_factory=list)
+
+
+try:
+    MANILA_TZ = ZoneInfo("Asia/Manila")
+except Exception:
+    # Windows hosts without the tzdata package still get PST (UTC+8, no DST).
+    MANILA_TZ = timezone(timedelta(hours=8), name="Asia/Manila")
+
+
+def parse_clock_time(value: Any) -> time | None:
+    """Accept TIME objects or common HH:MM / h:mm AM/PM strings."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        if value.tzinfo is not None:
+            value = value.astimezone(MANILA_TZ)
+        return value.time().replace(tzinfo=None, second=0, microsecond=0)
+    if isinstance(value, time):
+        return value.replace(tzinfo=None, second=0, microsecond=0)
+    if isinstance(value, timedelta):
+        total = int(value.total_seconds()) % (24 * 3600)
+        return time(total // 3600, (total % 3600) // 60)
+    text = str(value).strip()
+    try:
+        return parse_clock_time(datetime.fromisoformat(text))
+    except ValueError:
+        pass
+    for fmt in ("%H:%M:%S", "%H:%M", "%I:%M %p", "%I:%M:%S %p"):
+        try:
+            return datetime.strptime(text, fmt).time().replace(second=0, microsecond=0)
+        except ValueError:
+            continue
+    return None
+
+
+def format_time_hhmm(value: Any) -> str | None:
+    parsed = parse_clock_time(value)
+    return parsed.strftime("%H:%M") if parsed else None
+
+
+def now_manila() -> datetime:
+    return datetime.now(MANILA_TZ)
+
+
+def determine_attendance_status(
+    current_scan_time: Any,
+    required_time_in: Any,
+    grace_period_minutes: int | None = None,
+    late_threshold_minutes: int | None = None,
+) -> str:
+    """Compare a scan time against session rules using Philippine Standard Time.
+
+    Present: at/before required_time_in + grace
+    Late: after grace and at/before required_time_in + late_threshold
+    Absent: after late_threshold (or Late if late_threshold is unset)
+    """
+    scan = parse_clock_time(current_scan_time)
+    required = parse_clock_time(required_time_in)
+    if scan is None or required is None:
+        raise ValueError("Current scan time and required time-in must be valid.")
+
+    # Anchor both times on the same Manila calendar day for minute math.
+    day = now_manila().date()
+    scan_dt = datetime.combine(day, scan, tzinfo=MANILA_TZ)
+    required_dt = datetime.combine(day, required, tzinfo=MANILA_TZ)
+    grace = max(0, int(grace_period_minutes or 0))
+    present_until = required_dt + timedelta(minutes=grace)
+
+    if scan_dt <= present_until:
+        return "Present"
+
+    if late_threshold_minutes is None:
+        return "Late"
+
+    late_until = required_dt + timedelta(minutes=max(0, int(late_threshold_minutes)))
+    if scan_dt <= late_until:
+        return "Late"
+    return "Absent"
+
+
+def resolve_record_status(record: AttendanceRecord, sessions_by_key: dict[tuple[str, str], AttendanceSession]) -> str:
+    session = sessions_by_key.get((record.section.strip().casefold(), record.date))
+    if not session:
+        return record.status if record.status in {"Present", "Late", "Absent"} else "Present"
+    return determine_attendance_status(
+        record.time,
+        session.requiredTimeIn,
+        session.gracePeriodMinutes,
+        session.lateThresholdMinutes,
+    )
 
 
 class AdminLogin(BaseModel):
@@ -127,6 +232,12 @@ class InstructorLogin(BaseModel):
 
 class InstructorDecision(BaseModel):
     reason: str = Field(default="", max_length=500)
+
+
+class InstructorUpdate(BaseModel):
+    name: str = Field(min_length=1, max_length=255)
+    instructorId: str = Field(pattern=r"^C-\d{4}-\d{3}$")
+    newPassword: str = Field(default="", max_length=128)
 
 
 EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
@@ -209,6 +320,7 @@ def ensure_schema(connection: Any) -> None:
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS instructors (
               uid VARCHAR(64) PRIMARY KEY,
+              instructor_id VARCHAR(12) NULL,
               name VARCHAR(255) NOT NULL,
               email VARCHAR(255) NOT NULL UNIQUE,
               password_hash VARCHAR(255) NULL,
@@ -218,6 +330,7 @@ def ensure_schema(connection: Any) -> None:
               assigned_blocks JSON NOT NULL,
               rejection_reason VARCHAR(500) NULL,
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              UNIQUE KEY unique_instructor_id (instructor_id),
               CONSTRAINT instructors_role_check CHECK (role = 'instructor'),
               CONSTRAINT instructors_status_check CHECK (status IN ('pending', 'active', 'suspended', 'terminated', 'rejected'))
             ) CHARACTER SET utf8mb4
@@ -228,6 +341,11 @@ def ensure_schema(connection: Any) -> None:
             cursor.execute("ALTER TABLE instructors ADD COLUMN password_hash VARCHAR(255) NULL AFTER email")
         if "rejection_reason" not in instructor_columns:
             cursor.execute("ALTER TABLE instructors ADD COLUMN rejection_reason VARCHAR(500) NULL")
+        if "instructor_id" not in instructor_columns:
+            cursor.execute("ALTER TABLE instructors ADD COLUMN instructor_id VARCHAR(12) NULL AFTER uid")
+        cursor.execute("SHOW INDEX FROM instructors WHERE Key_name = 'unique_instructor_id'")
+        if not cursor.fetchone():
+            cursor.execute("CREATE UNIQUE INDEX unique_instructor_id ON instructors (instructor_id)")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS class_groups (
               course VARCHAR(64) NOT NULL,
@@ -272,9 +390,46 @@ def ensure_schema(connection: Any) -> None:
               attendance_date DATE NOT NULL,
               section VARCHAR(191) NOT NULL,
               attendance_time VARCHAR(32) NOT NULL,
+              status ENUM('Present', 'Late', 'Absent') NOT NULL DEFAULT 'Present',
+              time_out VARCHAR(32) NULL,
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
               UNIQUE KEY one_checkin_per_class_day (student_id, attendance_date, section),
               KEY attendance_by_date (attendance_date, section)
+            ) CHARACTER SET utf8mb4
+        """)
+        cursor.execute("SHOW COLUMNS FROM attendance_records")
+        attendance_columns = {row["Field"]: row for row in cursor.fetchall()}
+        if "status" not in attendance_columns:
+            cursor.execute(
+                "ALTER TABLE attendance_records ADD COLUMN status ENUM('Present', 'Late', 'Absent') NOT NULL DEFAULT 'Present' AFTER attendance_time"
+            )
+        elif attendance_columns["status"]["Type"].lower() != "enum('present','late','absent')":
+            cursor.execute(
+                """UPDATE attendance_records
+                   SET status = 'Present'
+                   WHERE status IS NULL OR status NOT IN ('Present', 'Late', 'Absent')"""
+            )
+            cursor.execute(
+                """ALTER TABLE attendance_records
+                   MODIFY COLUMN status ENUM('Present', 'Late', 'Absent') NOT NULL DEFAULT 'Present'"""
+            )
+        if "time_out" not in attendance_columns:
+            cursor.execute(
+                "ALTER TABLE attendance_records ADD COLUMN time_out VARCHAR(32) NULL AFTER status"
+            )
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS attendance_sessions (
+              id VARCHAR(64) PRIMARY KEY,
+              section VARCHAR(191) NOT NULL,
+              session_date DATE NOT NULL,
+              required_time_in TIME NOT NULL,
+              grace_period_minutes INT UNSIGNED NULL,
+              late_threshold_minutes INT UNSIGNED NULL,
+              time_out TIME NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+              UNIQUE KEY one_session_per_class_day (section, session_date),
+              KEY sessions_by_date (session_date, section)
             ) CHARACTER SET utf8mb4
         """)
 
@@ -353,6 +508,7 @@ def serialize_instructor(row: dict[str, Any]) -> dict[str, Any]:
     created = row.get("created_at")
     return {
         "uid": row["uid"],
+        "instructorId": row.get("instructor_id") or "",
         "name": row["name"],
         "email": row["email"],
         "status": row["status"],
@@ -366,13 +522,38 @@ def fetch_instructor(connection: Any, uid: str) -> dict[str, Any] | None:
     with connection.cursor() as cursor:
         cursor.execute(
             """
-            SELECT uid, name, email, status, assigned_blocks, rejection_reason, created_at
+            SELECT uid, instructor_id, name, email, status, assigned_blocks, rejection_reason, created_at
             FROM instructors
             WHERE uid = %s
             """,
             (uid,),
         )
         return cursor.fetchone()
+
+
+def assign_instructor_id(connection: Any, uid: str) -> str:
+    with connection.cursor() as cursor:
+        cursor.execute("SELECT instructor_id FROM instructors WHERE uid = %s", (uid,))
+        row = cursor.fetchone()
+        if not row:
+            return ""
+        if row["instructor_id"]:
+            return row["instructor_id"]
+        for _ in range(30):
+            instructor_id = f"C-{datetime.now().year}-{secrets.randbelow(1000):03d}"
+            try:
+                cursor.execute(
+                    "UPDATE instructors SET instructor_id = %s WHERE uid = %s AND instructor_id IS NULL",
+                    (instructor_id, uid),
+                )
+                if cursor.rowcount:
+                    return instructor_id
+                cursor.execute("SELECT instructor_id FROM instructors WHERE uid = %s", (uid,))
+                return (cursor.fetchone() or {}).get("instructor_id") or ""
+            except pymysql.err.IntegrityError as error:
+                if error.args[0] != 1062:
+                    raise
+        raise HTTPException(status_code=503, detail="Could not assign a unique instructor ID.")
 
 
 @app.get("/admin/instructors")
@@ -382,7 +563,7 @@ def list_instructors(_admin: dict[str, str] = Depends(current_admin)) -> dict[st
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT uid, name, email, status, assigned_blocks, rejection_reason, created_at
+                SELECT uid, instructor_id, name, email, status, assigned_blocks, rejection_reason, created_at
                 FROM instructors
                 ORDER BY
                   CASE status
@@ -396,6 +577,9 @@ def list_instructors(_admin: dict[str, str] = Depends(current_admin)) -> dict[st
                 """
             )
             rows = cursor.fetchall()
+            for row in rows:
+                if row["status"] != "pending" and not row["instructor_id"]:
+                    row["instructor_id"] = assign_instructor_id(connection, row["uid"])
     instructors = [serialize_instructor(row) for row in rows]
     return {
         "instructors": instructors,
@@ -416,6 +600,7 @@ def approve_instructor(uid: str, _admin: dict[str, str] = Depends(current_admin)
             raise HTTPException(status_code=404, detail="Instructor request was not found.")
         if instructor["status"] not in {"pending", "rejected", "suspended"}:
             raise HTTPException(status_code=400, detail="Only pending, rejected, or suspended accounts can be approved.")
+        assign_instructor_id(connection, uid)
         with connection.cursor() as cursor:
             cursor.execute(
                 "UPDATE instructors SET status = 'active', rejection_reason = NULL WHERE uid = %s",
@@ -423,6 +608,56 @@ def approve_instructor(uid: str, _admin: dict[str, str] = Depends(current_admin)
             )
         updated = fetch_instructor(connection, uid)
     return {"instructor": serialize_instructor(updated), "message": "Instructor approved."}
+
+
+@app.put("/admin/instructors/{uid}")
+def update_instructor(
+    uid: str,
+    payload: InstructorUpdate,
+    _admin: dict[str, str] = Depends(current_admin),
+) -> dict[str, Any]:
+    name = " ".join(payload.name.split())
+    instructor_id = payload.instructorId.strip().upper()
+    if not name or not re.fullmatch(r"C-\d{4}-\d{3}", instructor_id):
+        raise HTTPException(status_code=400, detail="Provide a name and instructor ID in C-YYYY-NNN format.")
+    if payload.newPassword and len(payload.newPassword) < 8:
+        raise HTTPException(status_code=400, detail="Passwords must contain at least 8 characters.")
+
+    with db_connection() as connection:
+        ensure_schema(connection)
+        instructor = fetch_instructor(connection, uid)
+        if not instructor:
+            raise HTTPException(status_code=404, detail="Instructor was not found.")
+        with connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT uid FROM instructors WHERE instructor_id = %s AND uid <> %s",
+                (instructor_id, uid),
+            )
+            if cursor.fetchone():
+                raise HTTPException(status_code=409, detail="That instructor ID is already in use.")
+            if payload.newPassword:
+                password_hash = bcrypt.hashpw(payload.newPassword.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+                try:
+                    cursor.execute(
+                        "UPDATE instructors SET name = %s, instructor_id = %s, password_hash = %s WHERE uid = %s",
+                        (name, instructor_id, password_hash, uid),
+                    )
+                except pymysql.err.IntegrityError as error:
+                    if error.args[0] == 1062:
+                        raise HTTPException(status_code=409, detail="That instructor ID is already in use.") from error
+                    raise
+            else:
+                try:
+                    cursor.execute(
+                        "UPDATE instructors SET name = %s, instructor_id = %s WHERE uid = %s",
+                        (name, instructor_id, uid),
+                    )
+                except pymysql.err.IntegrityError as error:
+                    if error.args[0] == 1062:
+                        raise HTTPException(status_code=409, detail="That instructor ID is already in use.") from error
+                    raise
+        updated = fetch_instructor(connection, uid)
+    return {"instructor": serialize_instructor(updated), "message": "Instructor details updated."}
 
 
 @app.post("/admin/instructors/{uid}/reject")
@@ -559,7 +794,7 @@ def instructor_login(payload: InstructorLogin) -> dict[str, Any]:
         with connection.cursor() as cursor:
             cursor.execute(
                 """
-                SELECT uid, name, email, password_hash, status, rejection_reason
+                SELECT uid, instructor_id, name, email, password_hash, status, rejection_reason
                 FROM instructors
                 WHERE LOWER(email) = LOWER(%s)
                 """,
@@ -604,6 +839,7 @@ def instructor_login(payload: InstructorLogin) -> dict[str, Any]:
         "instructor": {
             "id": instructor["uid"],
             "uid": instructor["uid"],
+            "instructorId": instructor.get("instructor_id") or "",
             "name": instructor["name"],
             "email": instructor["email"],
             "status": instructor["status"],
@@ -624,11 +860,12 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                 for row in cursor.fetchall()
             ]
             cursor.execute("""SELECT id, student_id, student_name, DATE_FORMAT(attendance_date, '%Y-%m-%d') AS date,
-                              section, attendance_time FROM attendance_records
+                              section, attendance_time, status, time_out FROM attendance_records
                               ORDER BY attendance_date DESC, created_at DESC""")
             records = [
                 {"id": row["id"], "studentId": row["student_id"], "name": row["student_name"],
-                 "date": row["date"], "section": row["section"], "time": row["attendance_time"]}
+                 "date": row["date"], "section": row["section"], "time": row["attendance_time"],
+                 "status": row.get("status") or "Present", "timeOut": row.get("time_out")}
                 for row in cursor.fetchall()
             ]
             cursor.execute("SELECT course, year_level, block FROM class_groups ORDER BY course, year_level, block")
@@ -636,7 +873,25 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                 {"course": row["course"], "yearLevel": row["year_level"], "block": row["block"]}
                 for row in cursor.fetchall()
             ]
-    return {"students": students, "records": records, "classes": classes}
+            cursor.execute("""SELECT id, section, DATE_FORMAT(session_date, '%Y-%m-%d') AS date,
+                              TIME_FORMAT(required_time_in, '%H:%i') AS required_time_in,
+                              grace_period_minutes, late_threshold_minutes,
+                              TIME_FORMAT(time_out, '%H:%i') AS time_out
+                              FROM attendance_sessions
+                              ORDER BY session_date DESC, section""")
+            sessions = [
+                {
+                    "id": row["id"],
+                    "section": row["section"],
+                    "date": row["date"],
+                    "requiredTimeIn": row["required_time_in"],
+                    "gracePeriodMinutes": row["grace_period_minutes"],
+                    "lateThresholdMinutes": row["late_threshold_minutes"],
+                    "timeOut": row["time_out"],
+                }
+                for row in cursor.fetchall()
+            ]
+    return {"students": students, "records": records, "classes": classes, "sessions": sessions}
 
 
 @app.put("/attendance")
@@ -671,18 +926,43 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
         student_names.add(student_name)
         if email:
             student_emails.add(email)
-    if any(record.studentId.casefold() not in student_ids for record in store.records):
-        raise HTTPException(status_code=422, detail="Attendance records must belong to an enrolled student.")
+    for record in store.records:
+        if record.studentId.casefold() not in student_ids:
+            raise HTTPException(status_code=422, detail="Attendance records must belong to an enrolled student.")
+        if parse_clock_time(record.time) is None:
+            raise HTTPException(status_code=422, detail="Each attendance record needs a valid time-in.")
+        if record.timeOut and parse_clock_time(record.timeOut) is None:
+            raise HTTPException(status_code=422, detail="Attendance record time-out must be a valid time.")
     class_keys = {(item.course.strip().casefold(), item.yearLevel, item.block.strip().casefold()) for item in store.classes}
     if len(class_keys) != len(store.classes):
         raise HTTPException(status_code=422, detail="Duplicate classes are not allowed.")
     student_classes = {(item.course.strip().casefold(), item.yearLevel, item.block.strip().casefold()) for item in store.students}
     if not student_classes.issubset(class_keys):
         raise HTTPException(status_code=422, detail="Every student must be assigned to an existing class.")
+    session_keys: set[tuple[str, str]] = set()
+    for session in store.sessions:
+        key = (session.section.strip().casefold(), session.date)
+        if key in session_keys:
+            raise HTTPException(status_code=422, detail="Duplicate attendance sessions are not allowed.")
+        if not parse_clock_time(session.requiredTimeIn):
+            raise HTTPException(status_code=422, detail="Each session needs a valid required time-in.")
+        if session.timeOut and not parse_clock_time(session.timeOut):
+            raise HTTPException(status_code=422, detail="Session time-out must be a valid time.")
+        if (
+            session.gracePeriodMinutes is not None
+            and session.lateThresholdMinutes is not None
+            and session.lateThresholdMinutes < session.gracePeriodMinutes
+        ):
+            raise HTTPException(status_code=422, detail="Late threshold must be greater than or equal to grace period.")
+        session_keys.add(key)
+    sessions_by_key = {
+        (session.section.strip().casefold(), session.date): session for session in store.sessions
+    }
     with db_connection() as connection:
         ensure_schema(connection)
         with connection.cursor() as cursor:
             cursor.execute("DELETE FROM attendance_records")
+            cursor.execute("DELETE FROM attendance_sessions")
             cursor.execute("DELETE FROM students")
             cursor.execute("DELETE FROM class_groups")
             if store.classes:
@@ -698,14 +978,49 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                     [(s.studentId, s.name, s.email, s.course, s.yearLevel, s.block,
                       json.dumps(s.descriptor), s.photo) for s in store.students],
                 )
+            if store.sessions:
+                cursor.executemany(
+                    """INSERT INTO attendance_sessions
+                    (id, section, session_date, required_time_in, grace_period_minutes,
+                     late_threshold_minutes, time_out)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    [
+                        (
+                            session.id,
+                            session.section.strip(),
+                            session.date,
+                            format_time_hhmm(session.requiredTimeIn),
+                            session.gracePeriodMinutes,
+                            session.lateThresholdMinutes,
+                            format_time_hhmm(session.timeOut) if session.timeOut else None,
+                        )
+                        for session in store.sessions
+                    ],
+                )
             if store.records:
                 cursor.executemany(
                     """INSERT INTO attendance_records
-                    (id, student_id, student_name, attendance_date, section, attendance_time)
-                    VALUES (%s, %s, %s, %s, %s, %s)""",
-                    [(r.id, r.studentId, r.name, r.date, r.section, r.time) for r in store.records],
+                    (id, student_id, student_name, attendance_date, section, attendance_time, status, time_out)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+                    [
+                        (
+                            r.id,
+                            r.studentId,
+                            r.name,
+                            r.date,
+                            r.section,
+                            r.time,
+                            resolve_record_status(r, sessions_by_key),
+                            (r.timeOut or None),
+                        )
+                        for r in store.records
+                    ],
                 )
-    return {"students": len(store.students), "records": len(store.records)}
+    return {
+        "students": len(store.students),
+        "records": len(store.records),
+        "sessions": len(store.sessions),
+    }
 
 
 @app.get("/health")

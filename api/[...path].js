@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { randomUUID } from "node:crypto";
+import { randomInt, randomUUID } from "node:crypto";
 import { listBlocks } from "./_lib/blocks.js";
 import { getDatabaseErrorMessage } from "./_lib/databaseErrorMessage.js";
 import { getPool } from "./_lib/database.js";
@@ -45,6 +45,7 @@ function parseBlocks(value) {
 function serializeInstructor(row) {
   return {
     uid: row.uid,
+    instructorId: row.instructor_id || "",
     name: row.name,
     email: row.email,
     status: row.status,
@@ -52,6 +53,46 @@ function serializeInstructor(row) {
     rejectionReason: row.rejection_reason || "",
     createdAt: row.created_at instanceof Date ? row.created_at.toISOString() : row.created_at,
   };
+}
+
+async function ensureInstructorIdSchema(pool) {
+  const [columns] = await pool.query("SHOW COLUMNS FROM instructors LIKE 'instructor_id'");
+  if (!columns.length) {
+    try {
+      await pool.query("ALTER TABLE instructors ADD COLUMN instructor_id VARCHAR(12) NULL AFTER uid");
+    } catch (error) {
+      if (error.code !== "ER_DUP_FIELDNAME") throw error;
+    }
+  }
+  const [indexes] = await pool.query("SHOW INDEX FROM instructors WHERE Key_name = 'unique_instructor_id'");
+  if (!indexes.length) {
+    try {
+      await pool.query("ALTER TABLE instructors ADD UNIQUE KEY unique_instructor_id (instructor_id)");
+    } catch (error) {
+      if (error.code !== "ER_DUP_KEYNAME") throw error;
+    }
+  }
+}
+
+async function assignInstructorId(pool, uid) {
+  const [rows] = await pool.execute("SELECT instructor_id FROM instructors WHERE uid = ?", [uid]);
+  if (!rows[0]) return "";
+  if (rows[0].instructor_id) return rows[0].instructor_id;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const instructorId = `C-${new Date().getFullYear()}-${String(randomInt(1000)).padStart(3, "0")}`;
+    try {
+      const [result] = await pool.execute(
+        "UPDATE instructors SET instructor_id = ? WHERE uid = ? AND instructor_id IS NULL",
+        [instructorId, uid],
+      );
+      if (result.affectedRows) return instructorId;
+      const [updated] = await pool.execute("SELECT instructor_id FROM instructors WHERE uid = ?", [uid]);
+      return updated[0]?.instructor_id || "";
+    } catch (error) {
+      if (error.code !== "ER_DUP_ENTRY") throw error;
+    }
+  }
+  throw new Error("Could not assign a unique instructor ID after several attempts.");
 }
 
 async function requireAdmin(req) {
@@ -103,6 +144,7 @@ async function handleAdmin(req, res, path, pool) {
 
   const auth = await requireAdmin(req);
   if (auth.error) return respond(res, auth.error[0], { message: auth.error[1] });
+  await ensureInstructorIdSchema(pool);
 
   if (action === "me" && req.method === "GET") {
     return respond(res, 200, { admin: auth.admin });
@@ -110,7 +152,7 @@ async function handleAdmin(req, res, path, pool) {
 
   if (action === "instructors" && path.length === 2 && req.method === "GET") {
     const [rows] = await pool.execute(
-      `SELECT uid, name, email, status, assigned_blocks, rejection_reason, created_at
+      `SELECT uid, instructor_id, name, email, status, assigned_blocks, rejection_reason, created_at
        FROM instructors
        ORDER BY CASE status
          WHEN 'pending' THEN 0
@@ -120,6 +162,11 @@ async function handleAdmin(req, res, path, pool) {
          ELSE 4
        END, created_at DESC`,
     );
+    for (const row of rows) {
+      if (row.status !== "pending" && !row.instructor_id) {
+        row.instructor_id = await assignInstructorId(pool, row.uid);
+      }
+    }
     const instructors = rows.map(serializeInstructor);
     return respond(res, 200, {
       instructors,
@@ -131,13 +178,57 @@ async function handleAdmin(req, res, path, pool) {
     });
   }
 
-  if (action !== "instructors" || path.length !== 4 || req.method !== "POST") {
+  if (action !== "instructors" || path.length !== 4) {
     return respond(res, 404, { message: "Route not found." });
   }
 
   const [, , uid, decision] = path;
+  if (decision === "update" && req.method === "PUT") {
+    const name = typeof body.name === "string" ? body.name.trim().replace(/\s+/g, " ") : "";
+    const instructorId = typeof body.instructorId === "string" ? body.instructorId.trim().toUpperCase() : "";
+    const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
+    if (!name || name.length > 255 || !/^C-\d{4}-\d{3}$/.test(instructorId)
+      || (body.newPassword !== undefined && typeof body.newPassword !== "string")
+      || (newPassword && (newPassword.length < 8 || newPassword.length > 128))) {
+      return respond(res, 400, {
+        message: "Provide a name, an instructor ID in C-YYYY-NNN format, and an optional password of 8–128 characters.",
+      });
+    }
+    const [existing] = await pool.execute("SELECT instructor_id FROM instructors WHERE uid = ?", [uid]);
+    if (!existing.length) return respond(res, 404, { message: "Instructor was not found." });
+    const [duplicate] = await pool.execute(
+      "SELECT uid FROM instructors WHERE instructor_id = ? AND uid <> ?",
+      [instructorId, uid],
+    );
+    if (duplicate.length) return respond(res, 409, { message: "That instructor ID is already in use." });
+
+    const values = [name, instructorId];
+    let updateSql = "UPDATE instructors SET name = ?, instructor_id = ?";
+    if (newPassword) {
+      updateSql += ", password_hash = ?";
+      values.push(await bcrypt.hash(newPassword, 12));
+    }
+    updateSql += " WHERE uid = ?";
+    values.push(uid);
+    try {
+      await pool.execute(updateSql, values);
+    } catch (error) {
+      if (error.code === "ER_DUP_ENTRY") {
+        return respond(res, 409, { message: "That instructor ID is already in use." });
+      }
+      throw error;
+    }
+    const [updatedRows] = await pool.execute(
+      `SELECT uid, instructor_id, name, email, status, assigned_blocks, rejection_reason, created_at
+       FROM instructors WHERE uid = ?`,
+      [uid],
+    );
+    return respond(res, 200, { instructor: serializeInstructor(updatedRows[0]), message: "Instructor details updated." });
+  }
+  if (req.method !== "POST") return respond(res, 404, { message: "Route not found." });
+
   const [matches] = await pool.execute(
-    "SELECT uid, status FROM instructors WHERE uid = ?",
+    "SELECT uid, instructor_id, status FROM instructors WHERE uid = ?",
     [uid],
   );
   const instructor = matches[0];
@@ -146,6 +237,7 @@ async function handleAdmin(req, res, path, pool) {
   let update;
   let message;
   if (decision === "approve" && ["pending", "rejected", "suspended"].includes(instructor.status)) {
+    await assignInstructorId(pool, uid);
     update = "UPDATE instructors SET status = 'active', rejection_reason = NULL WHERE uid = ?";
     message = "Instructor approved.";
   } else if (decision === "reject" && ["pending", "active", "suspended"].includes(instructor.status)) {
@@ -162,7 +254,7 @@ async function handleAdmin(req, res, path, pool) {
 
   if (decision !== "reject") await pool.execute(update, [uid]);
   const [updatedRows] = await pool.execute(
-    `SELECT uid, name, email, status, assigned_blocks, rejection_reason, created_at
+    `SELECT uid, instructor_id, name, email, status, assigned_blocks, rejection_reason, created_at
      FROM instructors WHERE uid = ?`,
     [uid],
   );
@@ -222,7 +314,7 @@ async function handleInstructorAuth(req, res, action, pool) {
     if (!email || !password) return respond(res, 400, { message: "Email and password are required." });
 
     const [rows] = await pool.execute(
-      `SELECT uid, name, email, password_hash, status, rejection_reason
+      `SELECT uid, instructor_id, name, email, password_hash, status, rejection_reason
        FROM instructors WHERE LOWER(email) = LOWER(?)`,
       [email],
     );
@@ -250,6 +342,7 @@ async function handleInstructorAuth(req, res, action, pool) {
       instructor: {
         id: instructor.uid,
         uid: instructor.uid,
+        instructorId: instructor.instructor_id || "",
         name: instructor.name,
         email: instructor.email,
         status: instructor.status,

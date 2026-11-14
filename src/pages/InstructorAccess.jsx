@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, Navigate, useLocation, useNavigate } from "react-router-dom";
 import AccessShell from "../components/AccessShell";
+import LewisSeeLogo from "../components/LewisSeeLogo";
 import { clearAdminSession } from "../api/adminApi";
 import { getInstructorApiUrl } from "../api/apiRoot";
 import { useAuth } from "../context/AuthContext";
@@ -15,6 +16,28 @@ const apiErrorMessage = (data, fallback) => {
 };
 
 const initialForm = { name: "", email: "", password: "", confirmPassword: "", requestedBlockIds: [] };
+
+function AccessFieldIcon({ type }) {
+  return type === "mail" ? (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="m4 7 8 6 8-6" />
+    </svg>
+  ) : (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <rect x="4" y="10" width="16" height="11" rx="2" />
+      <path d="M8 10V7a4 4 0 0 1 8 0v3M12 14v3" />
+    </svg>
+  );
+}
+
+function SubmitArrow() {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M5 12h14m-6-6 6 6-6 6" />
+    </svg>
+  );
+}
 
 function clearInstructorSession() {
   localStorage.removeItem("instructor-token");
@@ -47,7 +70,7 @@ export default function InstructorAccess() {
   const { login: adminLogin, logout: adminLogout, user, isAdmin, loading: authLoading } = useAuth();
   const location = useLocation();
   const navigate = useNavigate();
-  const [mode, setMode] = useState(() => (location.state?.openLogin ? "login" : "choose"));
+  const [mode, setMode] = useState("login");
   const [form, setForm] = useState(initialForm);
   const [blocks, setBlocks] = useState([]);
   const [blocksLoading, setBlocksLoading] = useState(false);
@@ -55,10 +78,6 @@ export default function InstructorAccess() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    if (location.state?.openLogin) setMode("login");
-  }, [location.state]);
 
   useEffect(() => {
     if (mode !== "register") return;
@@ -187,7 +206,7 @@ export default function InstructorAccess() {
       <AccessShell copy={heroCopy}>
         <div className="access-panel-top">
           <Link to="/" className="brand">
-            <span className="brand-mark" aria-hidden="true">LS</span>
+            <LewisSeeLogo className="brand-mark" />
             LewisSee
           </Link>
         </div>
@@ -222,7 +241,7 @@ export default function InstructorAccess() {
     <AccessShell copy={heroCopy}>
       <div className="access-panel-top">
         <Link to="/" className="brand">
-          <span className="brand-mark" aria-hidden="true">LS</span>
+          <LewisSeeLogo className="brand-mark" />
           LewisSee
         </Link>
         <button
@@ -248,7 +267,7 @@ export default function InstructorAccess() {
         </p>
       </header>
 
-      <form onSubmit={submit} className="access-form">
+      <form onSubmit={submit} className={`access-form access-form-${mode}`}>
         {mode === "register" && (
           <label>
             Full name
@@ -258,29 +277,37 @@ export default function InstructorAccess() {
 
         <label>
           {mode === "login" ? "Username or email" : "Email"}
-          <input
-            className="field"
-            type={mode === "login" ? "text" : "email"}
-            name="email"
-            value={form.email}
-            onChange={update}
-            required
-            autoComplete="username"
-          />
+          <span className="access-input-wrap">
+            <AccessFieldIcon type="mail" />
+            <input
+              className="field"
+              type={mode === "login" ? "text" : "email"}
+              name="email"
+              value={form.email}
+              onChange={update}
+              placeholder={mode === "login" ? "Enter your username or email" : "you@lewis.edu"}
+              required
+              autoComplete="username"
+            />
+          </span>
         </label>
 
         <label>
           Password
-          <input
-            className="field"
-            type="password"
-            name="password"
-            minLength={mode === "register" ? 8 : undefined}
-            value={form.password}
-            onChange={update}
-            required
-            autoComplete="current-password"
-          />
+          <span className="access-input-wrap">
+            <AccessFieldIcon type="lock" />
+            <input
+              className="field"
+              type="password"
+              name="password"
+              minLength={mode === "register" ? 8 : undefined}
+              value={form.password}
+              onChange={update}
+              placeholder="Enter your password"
+              required
+              autoComplete={mode === "register" ? "new-password" : "current-password"}
+            />
+          </span>
         </label>
 
         {mode === "register" && (
@@ -331,8 +358,9 @@ export default function InstructorAccess() {
         {error && <p className="alert error-alert">{error}</p>}
         {message && <p className="alert success-alert">{message}</p>}
 
-        <button disabled={busy || authLoading} className="primary-action">
+        <button type="submit" disabled={busy || authLoading || (mode === "register" && blocksLoading)} className="primary-action">
           {busy ? "Please wait…" : mode === "register" ? "Submit request" : "Sign in"}
+          {!busy && <SubmitArrow />}
         </button>
 
         {mode === "login" && (
@@ -341,6 +369,23 @@ export default function InstructorAccess() {
           </p>
         )}
       </form>
+      <p className="access-switch">
+        {mode === "login" ? "Need instructor access?" : "Already have an account?"}
+        <button
+          type="button"
+          onClick={() => {
+            setError("");
+            setMessage("");
+            if (mode === "login") {
+              openRegistration();
+            } else {
+              setMode("login");
+            }
+          }}
+        >
+          {mode === "login" ? "Request access" : "Sign in"}
+        </button>
+      </p>
     </AccessShell>
   );
 }

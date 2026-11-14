@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import LewisSeeLogo from "./LewisSeeLogo";
 
 const navigation = [
   { to: "/dashboard", label: "Dashboard", hint: "Live attendance" },
@@ -26,9 +27,7 @@ export default function AdminLayout() {
     <div className="admin-shell">
       <aside className="admin-sidebar">
         <div className="admin-brand">
-          <span className="admin-brand-mark" aria-hidden="true">
-            LS
-          </span>
+          <LewisSeeLogo className="admin-brand-mark" />
           <div>
             <p className="admin-brand-name">LewisSee</p>
             <p className="admin-brand-sub">Admin console</p>

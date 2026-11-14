@@ -42,6 +42,20 @@ body:has(.attendance-app) {
   border-color: var(--line);
 }
 
+.attendance-app .student-id-input {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attendance-app .student-id-input input:first-of-type {
+  width: 7ch;
+}
+
+.attendance-app .student-id-input input:last-of-type {
+  width: 5ch;
+}
+
 .attendance-app .workspace-nav {
   gap: 4px;
   margin-top: 16px;
@@ -142,6 +156,60 @@ body:has(.attendance-app) {
   margin-top: 4px;
 }
 
+.attendance-app .session-policy-form {
+  margin: 0 0 18px;
+  padding: 18px;
+}
+
+.attendance-app .session-policy-meta {
+  margin: 0 0 14px;
+}
+
+.attendance-app .session-policy-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+  margin-bottom: 14px;
+}
+
+.attendance-app .record-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.attendance-status-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.5rem;
+  padding: 0.2rem 0.55rem;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+.attendance-status-badge.status-present {
+  background: color-mix(in srgb, var(--good) 18%, transparent);
+  color: var(--good);
+  border: 1px solid color-mix(in srgb, var(--good) 45%, transparent);
+}
+
+.attendance-status-badge.status-late {
+  background: color-mix(in srgb, var(--warning) 18%, transparent);
+  color: var(--warning);
+  border: 1px solid color-mix(in srgb, var(--warning) 45%, transparent);
+}
+
+.attendance-status-badge.status-absent {
+  background: color-mix(in srgb, var(--danger) 18%, transparent);
+  color: var(--danger);
+  border: 1px solid color-mix(in srgb, var(--danger) 45%, transparent);
+}
+
 @media (max-width: 800px) {
   .attendance-app {
     width: min(100% - 28px, 720px);
@@ -151,5 +219,200 @@ body:has(.attendance-app) {
   .attendance-app .records-card,
   .attendance-app .management-card {
     padding: 16px;
+  }
+
+  .attendance-app .header-controls {
+    display: flex;
+    width: 100%;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 8px;
+  }
+}
+
+@media (max-width: 520px) {
+  .attendance-app {
+    width: calc(100% - 20px);
+    padding-bottom: max(28px, env(safe-area-inset-bottom));
+  }
+
+  .attendance-app .topbar {
+    align-items: flex-start;
+    gap: 10px;
+    padding: 12px;
+  }
+
+  .attendance-app .header-controls {
+    flex-wrap: wrap;
+    justify-content: space-between;
+  }
+
+  .attendance-app .staff-info {
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .attendance-app .workspace-nav {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 3px;
+    padding: 4px;
+  }
+
+  .attendance-app .workspace-nav button {
+    min-width: 0;
+    min-height: 42px;
+    padding: 7px 3px;
+    font-size: 0.72rem;
+  }
+
+  .attendance-app .page-heading {
+    padding: 22px 2px 14px;
+  }
+
+  .attendance-app .page-heading h1 {
+    font-size: clamp(1.65rem, 8vw, 2rem);
+  }
+
+  .attendance-app .filters {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+    gap: 8px;
+  }
+
+  .attendance-app .filters label {
+    min-width: 0;
+  }
+
+  .attendance-app .filters input,
+  .attendance-app .filters select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .attendance-app .camera-card,
+  .attendance-app .records-card,
+  .attendance-app .management-card,
+  .attendance-app .enrollment-section {
+    padding: 14px;
+  }
+
+  .attendance-app .section-title {
+    gap: 10px;
+  }
+
+  .attendance-app .student-row {
+    display: grid;
+    grid-template-columns: 36px minmax(0, 1fr) repeat(2, minmax(54px, auto));
+    gap: 7px;
+    padding: 8px;
+  }
+
+  .attendance-app .student-row > span:nth-child(2) {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .attendance-app .student-row .edit-student,
+  .attendance-app .student-row .delete-student {
+    min-width: 0;
+    min-height: 40px;
+    padding: 7px;
+    font-size: 0.76rem;
+  }
+
+  .attendance-app .student-modal-backdrop {
+    align-items: end;
+    padding: 8px 8px env(safe-area-inset-bottom);
+  }
+
+  .attendance-app .student-modal {
+    width: 100%;
+    max-height: calc(100dvh - 16px);
+    border-radius: 16px 16px 0 0;
+  }
+
+  .attendance-app .student-modal-header {
+    padding: 18px 18px 14px;
+  }
+
+  .attendance-app .student-modal-fields {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 14px;
+    padding: 18px;
+  }
+
+  .attendance-app .student-modal-fields label:nth-child(3),
+  .attendance-app .student-modal-fields label:nth-child(4) {
+    grid-column: auto;
+  }
+
+  .attendance-app .student-modal-fields input,
+  .attendance-app .student-modal-fields select {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .attendance-app .student-modal-fields input[type="file"] {
+    font-size: 0.78rem;
+  }
+
+  .attendance-app .student-modal-actions {
+    position: sticky;
+    bottom: 0;
+    padding: 12px 18px max(12px, env(safe-area-inset-bottom));
+    background: var(--surface);
+  }
+
+  .attendance-app .student-modal-actions button {
+    flex: 1;
+    min-height: 44px;
+  }
+
+  .attendance-app .student-id-input {
+    gap: 6px;
+  }
+
+  .attendance-app .student-id-input input:first-of-type {
+    width: 7ch;
+    flex: 0 1 7ch;
+  }
+
+  .attendance-app .student-id-input input:last-of-type {
+    width: 5ch;
+    flex: 0 1 5ch;
+  }
+
+  .attendance-app .history-controls,
+  .attendance-app .history-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .attendance-app .history-table-wrap table {
+    min-width: 620px;
+  }
+
+  .attendance-app .history-form .form-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .attendance-app .history-form .form-actions button,
+  .attendance-app .class-row button {
+    min-height: 42px;
+  }
+
+  .attendance-app .notification {
+    right: 10px;
+    bottom: max(10px, env(safe-area-inset-bottom));
+    left: 10px;
+    max-width: none;
+  }
+
+  .attendance-app .session-policy-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 }
