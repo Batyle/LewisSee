@@ -43,17 +43,17 @@ body:has(.attendance-app) {
 }
 
 .attendance-app .student-id-input {
-  display: flex;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 0.8fr);
   align-items: center;
-  gap: 8px;
+  gap: 9px;
+  width: 100%;
 }
 
-.attendance-app .student-id-input input:first-of-type {
-  width: 7ch;
-}
-
-.attendance-app .student-id-input input:last-of-type {
-  width: 5ch;
+.attendance-app .student-id-input input {
+  width: 100%;
+  min-width: 0;
+  text-align: center;
 }
 
 .attendance-app .workspace-nav {
@@ -146,10 +146,201 @@ body:has(.attendance-app) {
 }
 
 .attendance-app .student-modal {
-  border-radius: 10px;
-  background: var(--surface);
+  width: min(100%, 700px);
+  max-height: calc(100dvh - 48px);
+  overflow: auto;
+  border: 1px solid color-mix(in srgb, var(--line) 75%, transparent);
+  border-top: 3px solid var(--accent);
+  border-radius: 22px;
+  background:
+    radial-gradient(ellipse at 100% 0, color-mix(in srgb, var(--accent) 10%, transparent), transparent 38%),
+    var(--surface);
+  box-shadow: 0 28px 80px rgb(0 0 0 / 38%);
+  animation: student-modal-enter 220ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.attendance-app .student-modal-backdrop {
+  z-index: 1200;
+  padding: 24px;
+  background: rgb(5 12 20 / 68%);
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+}
+
+.attendance-app .student-modal-header {
+  align-items: center;
+  padding: 25px 30px 21px;
+}
+
+.attendance-app .student-modal-header .eyebrow {
+  margin-bottom: 8px;
+}
+
+.attendance-app .student-modal-header h2 {
+  font-size: clamp(1.35rem, 3vw, 1.65rem);
+  letter-spacing: -0.035em;
+}
+
+.attendance-app .student-modal-header #student-modal-description {
+  margin: 7px 0 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  font-weight: 400;
+  line-height: 1.45;
+}
+
+.attendance-app .student-modal .modal-close {
+  display: grid;
+  flex: 0 0 40px;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  padding: 0;
   border: 1px solid var(--line);
-  box-shadow: none;
+  border-radius: 12px;
+  font-size: 1.5rem;
+  transition: background 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+
+.attendance-app .student-modal .modal-close:hover {
+  transform: rotate(90deg);
+  border-color: var(--accent);
+  background: var(--chip);
+  color: var(--text);
+}
+
+.attendance-app .student-modal-fields {
+  gap: 20px 22px;
+  padding: 26px 30px 30px;
+}
+
+.attendance-app .student-modal-fields > label {
+  min-width: 0;
+  gap: 9px;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.attendance-app .student-modal-fields > label:nth-child(5) {
+  grid-column: 1 / -1;
+}
+
+.attendance-app .student-modal-fields > label:nth-child(3),
+.attendance-app .student-modal-fields > label:nth-child(4) {
+  grid-column: auto;
+}
+
+.attendance-app .student-modal-fields input:not([type="file"]),
+.attendance-app .student-modal-fields select {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 11px 14px;
+  border-radius: 12px;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background 150ms ease;
+}
+
+.attendance-app .student-modal-fields input:not([type="file"]):focus,
+.attendance-app .student-modal-fields select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.attendance-app .student-modal-fields .student-id-input > span {
+  color: var(--muted);
+  font-size: 0.95rem;
+  font-weight: 800;
+}
+
+.attendance-app .student-modal-fields small {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 450;
+  line-height: 1.4;
+}
+
+.attendance-app .student-modal-fields .field-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attendance-app .student-modal-fields .field-optional {
+  color: var(--muted);
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.attendance-app .student-modal-fields input[type="file"] {
+  width: 100%;
+  min-height: 58px;
+  padding: 8px;
+  border: 1px dashed color-mix(in srgb, var(--accent) 60%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--accent) 5%, var(--surface));
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.attendance-app .student-modal-fields input[type="file"]::file-selector-button {
+  min-height: 38px;
+  margin-right: 12px;
+  padding: 8px 13px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--chip);
+  color: var(--text);
+  font-weight: 750;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.attendance-app .student-modal-fields input[type="file"]::file-selector-button:hover {
+  background: color-mix(in srgb, var(--accent) 22%, var(--chip));
+}
+
+.attendance-app .student-modal-actions {
+  position: sticky;
+  bottom: 0;
+  padding: 18px 30px max(18px, env(safe-area-inset-bottom));
+  border-top: 1px solid var(--line);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  backdrop-filter: blur(14px);
+}
+
+.attendance-app .student-modal-actions button {
+  min-height: 46px;
+  padding-inline: 20px;
+  border-radius: 12px;
+}
+
+.attendance-app .student-modal-actions .modal-cancel {
+  border: 1px solid transparent;
+  color: var(--muted);
+}
+
+.attendance-app .student-modal-actions .modal-cancel:hover:not(:disabled) {
+  border-color: var(--line);
+  background: var(--chip);
+  color: var(--text);
+}
+
+.attendance-app .student-modal-actions .enroll-button {
+  min-width: 160px;
+  box-shadow: 0 7px 18px color-mix(in srgb, var(--primary) 25%, transparent);
+}
+
+@keyframes student-modal-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
 }
 
 .admin-content .attendance-app .topbar {
@@ -355,22 +546,17 @@ body:has(.attendance-app) {
   .attendance-app .student-modal {
     width: 100%;
     max-height: calc(100dvh - 16px);
-    border-radius: 16px 16px 0 0;
+    border-radius: 22px 22px 0 0;
   }
 
   .attendance-app .student-modal-header {
-    padding: 18px 18px 14px;
+    padding: 20px 20px 17px;
   }
 
   .attendance-app .student-modal-fields {
     grid-template-columns: minmax(0, 1fr);
-    gap: 14px;
-    padding: 18px;
-  }
-
-  .attendance-app .student-modal-fields label:nth-child(3),
-  .attendance-app .student-modal-fields label:nth-child(4) {
-    grid-column: auto;
+    gap: 17px;
+    padding: 20px;
   }
 
   .attendance-app .student-modal-fields input,
@@ -379,15 +565,15 @@ body:has(.attendance-app) {
     min-width: 0;
   }
 
-  .attendance-app .student-modal-fields input[type="file"] {
-    font-size: 0.78rem;
+  .attendance-app .student-modal-fields > label:nth-child(3),
+  .attendance-app .student-modal-fields > label:nth-child(4),
+  .attendance-app .student-modal-fields > label:nth-child(5) {
+    grid-column: auto;
   }
 
   .attendance-app .student-modal-actions {
-    position: sticky;
-    bottom: 0;
-    padding: 12px 18px max(12px, env(safe-area-inset-bottom));
-    background: var(--surface);
+    gap: 10px;
+    padding: 14px 20px max(14px, env(safe-area-inset-bottom));
   }
 
   .attendance-app .student-modal-actions button {
@@ -395,18 +581,8 @@ body:has(.attendance-app) {
     min-height: 44px;
   }
 
-  .attendance-app .student-id-input {
-    gap: 6px;
-  }
-
-  .attendance-app .student-id-input input:first-of-type {
-    width: 7ch;
-    flex: 0 1 7ch;
-  }
-
-  .attendance-app .student-id-input input:last-of-type {
-    width: 5ch;
-    flex: 0 1 5ch;
+  .attendance-app .student-modal-actions .enroll-button {
+    min-width: 0;
   }
 
   .attendance-app .history-controls,

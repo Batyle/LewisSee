@@ -1245,79 +1245,97 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         </div>
         {isEnrollmentOpen && (
           <div className="student-modal-backdrop" role="presentation">
-            <form className="student-modal" onSubmit={enroll}>
+            <form
+              className="student-modal"
+              onSubmit={enroll}
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="student-modal-title"
+              aria-describedby="student-modal-description"
+            >
               <header className="student-modal-header">
                 <div>
                   <p className="eyebrow">STUDENT DIRECTORY</p>
-                  <h2>Enroll a student</h2>
+                  <h2 id="student-modal-title">Enroll a student</h2>
+                  <p id="student-modal-description">
+                    Add the student’s details and a clear reference portrait.
+                  </p>
                 </div>
                 <button className="modal-close" type="button" aria-label="Close enrollment form" onClick={() => setEnrollmentOpen(false)}>×</button>
               </header>
               <div className="student-modal-fields">
-          <label>
-            Full name
-            <input
-              required
-              value={form.name}
-              onChange={(e) => setForm({ ...form, name: e.target.value })}
-            />
-          </label>
-          <label>
-            Student ID
-            <div className="student-id-input" role="group" aria-label="Student ID">
-              <span aria-hidden="true">C-</span>
-              <input
-                required
-                aria-label="Student ID year"
-                inputMode="numeric"
-                pattern="[0-9]{4}"
-                maxLength={4}
-                placeholder="2026"
-                value={form.studentIdYear}
-                onChange={(e) => setForm({ ...form, studentIdYear: e.target.value })}
-              />
-              <span aria-hidden="true">-</span>
-              <input
-                required
-                aria-label="Three-digit student number"
-                inputMode="numeric"
-                pattern="[0-9]{3}"
-                maxLength={3}
-                placeholder="781"
-                value={form.studentIdNumber}
-                onChange={(e) => setForm({ ...form, studentIdNumber: e.target.value })}
-              />
-            </div>
-          </label>
-          <label>
-            Email
-            <input
-              type="email"
-              value={form.email}
-              onChange={(e) => setForm({ ...form, email: e.target.value })}
-            />
-          </label>
-          <label>
-            Class assignment
-            <select required value={`${form.course}|${form.yearLevel}|${form.block}`} onChange={(e) => chooseClass(e.target.value, (next) => setForm({ ...form, ...next }))}>
-              {activeClasses.map((item) => <option key={classLabel(item)} value={`${item.course}|${item.yearLevel}|${item.block}`}>{classLabel(item)}</option>)}
-            </select>
-          </label>
-          <label>
-            Reference portrait
-            <input
-              required
-              type="file"
-              accept="image/*"
-              onChange={(e) => setFile(e.target.files?.[0])}
-            />
-          </label>
+                <label>
+                  Full name
+                  <input
+                    required
+                    autoComplete="name"
+                    placeholder="e.g. Alex Santos"
+                    value={form.name}
+                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Student ID
+                  <div className="student-id-input" role="group" aria-label="Student ID">
+                    <span aria-hidden="true">C-</span>
+                    <input
+                      required
+                      aria-label="Student ID year"
+                      inputMode="numeric"
+                      pattern="[0-9]{4}"
+                      maxLength={4}
+                      placeholder="2026"
+                      value={form.studentIdYear}
+                      onChange={(e) => setForm({ ...form, studentIdYear: e.target.value })}
+                    />
+                    <span aria-hidden="true">-</span>
+                    <input
+                      required
+                      aria-label="Three-digit student number"
+                      inputMode="numeric"
+                      pattern="[0-9]{3}"
+                      maxLength={3}
+                      placeholder="781"
+                      value={form.studentIdNumber}
+                      onChange={(e) => setForm({ ...form, studentIdNumber: e.target.value })}
+                    />
+                  </div>
+                  <small>Enter the 4-digit year and 3-digit student number.</small>
+                </label>
+                <label>
+                  <span className="field-label">
+                    Email <span className="field-optional">Optional</span>
+                  </span>
+                  <input
+                    type="email"
+                    autoComplete="email"
+                    placeholder="student@example.com"
+                    value={form.email}
+                    onChange={(e) => setForm({ ...form, email: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Class assignment
+                  <select required value={`${form.course}|${form.yearLevel}|${form.block}`} onChange={(e) => chooseClass(e.target.value, (next) => setForm({ ...form, ...next }))}>
+                    {activeClasses.map((item) => <option key={classLabel(item)} value={`${item.course}|${item.yearLevel}|${item.block}`}>{classLabel(item)}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Reference portrait
+                  <input
+                    required
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => setFile(e.target.files?.[0])}
+                  />
+                  <small>Choose a clear, front-facing photo in JPG, PNG, or WEBP format.</small>
+                </label>
               </div>
               <footer className="student-modal-actions">
                 <button className="modal-cancel" type="button" disabled={enrolling} onClick={() => setEnrollmentOpen(false)}>Cancel</button>
-          <button className="enroll-button" disabled={enrolling}>
-            {enrolling ? "Verifying…" : "Enroll student"}
-          </button>
+                <button className="enroll-button" disabled={enrolling}>
+                  {enrolling ? "Verifying…" : "Enroll student"}
+                </button>
               </footer>
             </form>
           </div>
