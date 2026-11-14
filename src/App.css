@@ -214,6 +214,10 @@ h1, h2, p { margin-top: 0; color: var(--text); }
 .modal-close { font-size: 1.6rem; line-height: 1; }
 .student-modal-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 24px 28px; }
 .student-modal-fields label:nth-child(3), .student-modal-fields label:nth-child(4) { grid-column: 1 / -1; }
+.portrait-preview { display: flex; align-items: center; gap: 12px; margin-top: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--chip); }
+.portrait-preview img { width: 68px; height: 78px; border-radius: 6px; object-fit: cover; }
+.portrait-preview small, .portrait-preview-placeholder { color: var(--muted); font-size: 0.78rem; }
+.portrait-preview.empty { min-height: 78px; }
 .student-modal-actions { display: flex; justify-content: flex-end; gap: 10px; padding: 18px 28px; border-top: 1px solid var(--line); }
 .student-modal-actions .enroll-button { margin: 0; }
 .edit-student-form { margin: 0; }

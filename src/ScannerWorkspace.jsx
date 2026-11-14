@@ -102,6 +102,12 @@ const toDataUrl = (file) =>
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+const selectPortraitFile = (file, setFile, setPreview, previewUrl) => {
+  if (previewUrl.current) URL.revokeObjectURL(previewUrl.current);
+  previewUrl.current = file ? URL.createObjectURL(file) : "";
+  setFile(file);
+  setPreview(previewUrl.current);
+};
 const LIVE_LIVENESS_API_URL = "https://liveliness-server.vercel.app/liveness";
 const isLocalUrl = (url) =>
   /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(String(url || "").trim());
@@ -230,6 +236,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [match, setMatch] = useState(null);
   const [form, setForm] = useState({ name: "", ...studentIdFields(), email: "", course: "BSIT", yearLevel: "3", block: "A" }),
     [file, setFile] = useState(null),
+    [filePreview, setFilePreview] = useState(""),
     [notice, setNotice] = useState(""),
     [page, setPage] = useState("scan"),
     [newClass, setNewClass] = useState({ course: "", yearLevel: "1", block: "A" }),
@@ -243,7 +250,14 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [historyEditingId, setHistoryEditingId] = useState(null),
     [editForm, setEditForm] = useState({ name: "", studentId: "", email: "", course: "BSIT", yearLevel: "3", block: "A" }),
     [editFile, setEditFile] = useState(null),
+    [editFilePreview, setEditFilePreview] = useState(""),
     [savingEdit, setSavingEdit] = useState(false);
+  const filePreviewUrl = useRef("");
+  const editFilePreviewUrl = useRef("");
+  useEffect(() => () => {
+    if (filePreviewUrl.current) URL.revokeObjectURL(filePreviewUrl.current);
+    if (editFilePreviewUrl.current) URL.revokeObjectURL(editFilePreviewUrl.current);
+  }, []);
   const [theme, setTheme] = useState(getTheme),
     [online, setOnline] = useState(true),
     [connection, setConnection] = useState("standby"),
@@ -431,6 +445,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     () => sessions.find((item) => item.section === section && item.date === date) || null,
     [date, section, sessions],
   );
+  const editingStudent = students.find((student) => student.studentId === editingId);
   const attendancePolicyReady = isAttendancePolicyReady(activeSession);
   const saveSessionPolicy = useCallback((nextSession) => {
     setSessions((all) => {
@@ -746,6 +761,14 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     addEventListener("visibilitychange", change);
     return () => removeEventListener("visibilitychange", change);
   }, [access, loop, ready, stop]);
+  const closeEnrollment = () => {
+    selectPortraitFile(null, setFile, setFilePreview, filePreviewUrl);
+    setEnrollmentOpen(false);
+  };
+  const closeEdit = () => {
+    selectPortraitFile(null, setEditFile, setEditFilePreview, editFilePreviewUrl);
+    setEditingId(null);
+  };
   const enroll = async (event) => {
     event.preventDefault();
     if (!file) return setNotice("Choose a reference portrait.");
@@ -792,6 +815,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           photo,
         },
       ]);
+      selectPortraitFile(null, setFile, setFilePreview, filePreviewUrl);
       setForm({ name: "", ...studentIdFields(), email: "", course, yearLevel, block });
       setNotice("Student enrolled.");
       setEnrollmentOpen(false);
@@ -804,6 +828,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     }
   };
   const beginEdit = (student) => {
+    selectPortraitFile(null, setEditFile, setEditFilePreview, editFilePreviewUrl);
     setEditingId(student.studentId);
     setEditForm({
       name: student.name,
@@ -878,6 +903,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           ? { ...record, studentId: nextId, name: nextName }
           : record),
       );
+      selectPortraitFile(null, setEditFile, setEditFilePreview, editFilePreviewUrl);
       setEditingId(null);
       setNotice("Student information updated.");
     } catch (cause) {
@@ -1270,7 +1296,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             <p className="eyebrow">STUDENT DIRECTORY</p>
             <h2>Student directory</h2>
           </div>
-          <button type="button" onClick={() => setEnrollmentOpen(true)}>
+          <button type="button" onClick={() => {
+            selectPortraitFile(null, setFile, setFilePreview, filePreviewUrl);
+            setEnrollmentOpen(true);
+          }}>
             Enroll student
           </button>
         </div>
@@ -1292,7 +1321,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                     Add the student’s details and a clear reference portrait.
                   </p>
                 </div>
-                <button className="modal-close" type="button" aria-label="Close enrollment form" onClick={() => setEnrollmentOpen(false)}>×</button>
+                <button className="modal-close" type="button" aria-label="Close enrollment form" onClick={closeEnrollment}>×</button>
               </header>
               <div className="student-modal-fields">
                 <label>
@@ -1357,13 +1386,21 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                     required
                     type="file"
                     accept="image/*"
-                    onChange={(e) => setFile(e.target.files?.[0])}
+                    onChange={(e) => selectPortraitFile(e.target.files?.[0] || null, setFile, setFilePreview, filePreviewUrl)}
                   />
                   <small>Choose a clear, front-facing photo in JPG, PNG, or WEBP format.</small>
+                  <div className={`portrait-preview ${filePreview ? "" : "empty"}`}>
+                    {filePreview ? (
+                      <img src={filePreview} alt="Selected student portrait preview" />
+                    ) : (
+                      <span className="portrait-preview-placeholder">No portrait selected</span>
+                    )}
+                    <small>{filePreview ? "Selected portrait preview" : "Choose an image to preview it here."}</small>
+                  </div>
                 </label>
               </div>
               <footer className="student-modal-actions">
-                <button className="modal-cancel" type="button" disabled={enrolling} onClick={() => setEnrollmentOpen(false)}>Cancel</button>
+                <button className="modal-cancel" type="button" disabled={enrolling} onClick={closeEnrollment}>Cancel</button>
                 <button className="enroll-button" disabled={enrolling}>
                   {enrolling ? "Verifying…" : "Enroll student"}
                 </button>
@@ -1411,7 +1448,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                 <p className="eyebrow">EDIT STUDENT</p>
                 <h2>Update student information</h2>
               </div>
-              <button className="modal-close" type="button" aria-label="Close edit form" onClick={() => setEditingId(null)}>×</button>
+              <button className="modal-close" type="button" aria-label="Close edit form" onClick={closeEdit}>×</button>
             </header>
             <div className="student-modal-fields">
               <label>
@@ -1477,13 +1514,24 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                 <input
                   type="file"
                   accept="image/*"
-                  onChange={(e) => setEditFile(e.target.files?.[0] || null)}
+                  onChange={(e) => selectPortraitFile(e.target.files?.[0] || null, setEditFile, setEditFilePreview, editFilePreviewUrl)}
                 />
+                <div className={`portrait-preview ${editFilePreview || editingStudent?.photo ? "" : "empty"}`}>
+                  {editFilePreview || editingStudent?.photo ? (
+                    <img
+                      src={editFilePreview || editingStudent.photo}
+                      alt={`${editForm.name || "Student"} portrait preview`}
+                    />
+                  ) : (
+                    <span className="portrait-preview-placeholder">No portrait available</span>
+                  )}
+                  <small>{editFilePreview ? "Replacement portrait preview" : "Current saved portrait"}</small>
+                </div>
               </label>
               <button disabled={savingEdit}>
                 {savingEdit ? "Saving…" : "Save changes"}
               </button>
-              <button type="button" onClick={() => setEditingId(null)}>
+              <button type="button" onClick={closeEdit}>
                 Cancel
               </button>
             </div>
