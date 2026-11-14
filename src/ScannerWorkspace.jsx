@@ -138,7 +138,7 @@ const sendAttendanceEmail = async (student, record) => {
     student_id: student.studentId,
     class_name: record.section,
     attendance_date: record.date,
-    attendance_time: record.time,
+    attendance_time: formatClock12Hour(record.time),
     message: "Your attendance has been recorded.",
   }, {
     publicKey,
