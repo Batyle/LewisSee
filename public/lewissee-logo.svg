@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="200" height="200" viewBox="0 0 200 200" fill="none">
+  <defs>
+    <linearGradient id="lewissee-gradient" x1="52" y1="30" x2="165" y2="170" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#39dcff"/>
+      <stop offset="1" stop-color="#0750df"/>
+    </linearGradient>
+    <filter id="lewissee-glow" x="30" y="85" width="140" height="30" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="5"/>
+    </filter>
+  </defs>
+  <path d="M35 65V40c0-6 4-10 10-10h20M135 30h20c6 0 10 4 10 10v25M35 135v25c0 6 4 10 10 10h20m70 0h20c6 0 10-4 10-10v-25" stroke="#27baff" stroke-width="9" stroke-linecap="round"/>
+  <circle cx="100" cy="75" r="24" fill="url(#lewissee-gradient)"/>
+  <path d="M52 145c3-32 23-45 48-45s45 13 48 45H52Z" fill="url(#lewissee-gradient)"/>
+  <line x1="45" y1="100" x2="155" y2="100" stroke="#72eaff" stroke-width="4" opacity=".8" filter="url(#lewissee-glow)"/>
+  <line x1="45" y1="100" x2="155" y2="100" stroke="#72eaff" stroke-width="3" opacity=".75"/>
+  <path d="m145 145 13 13 22-26" stroke="#65e8ff" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>
