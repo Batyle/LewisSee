@@ -119,7 +119,7 @@ const verifyLiveness = async (canvas) => {
   if (!response.ok) throw new Error(`Liveness service returned ${response.status}.`);
   return response.json();
 };
-const sendAttendanceEmail = async (student, record) => {
+const sendAttendanceEmail = async (student, record, frame) => {
   const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID?.trim();
   const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID?.trim();
   const publicKey =
@@ -131,6 +131,8 @@ const sendAttendanceEmail = async (student, record) => {
   if (!serviceId || !templateId || !publicKey)
     throw new Error("EmailJS is not configured for this deployment.");
 
+  const attendancePhoto = frame.toDataURL("image/jpeg", 0.65);
+
   await emailjs.send(serviceId, templateId, {
     to_email: recipient,
     to_name: student.name,
@@ -139,7 +141,8 @@ const sendAttendanceEmail = async (student, record) => {
     class_name: record.section,
     attendance_date: record.date,
     attendance_time: formatClock12Hour(record.time),
-    message: "Your attendance has been recorded.",
+    message: "Your attendance has been recorded. A photo from the verified check-in is attached.",
+    attendance_photo: attendancePhoto,
   }, {
     publicKey,
   });
@@ -451,7 +454,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     );
   }, []);
   const present = useCallback(
-    (student) =>
+    (student, frame) =>
       setRecords((all) => {
         if (
           all.some(
@@ -486,7 +489,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         socket.current?.send({ type: "attendance", id: record.id, record });
         if (!emailedRecords.current.has(record.id)) {
           emailedRecords.current.add(record.id);
-          void sendAttendanceEmail(student, record)
+          void sendAttendanceEmail(student, record, frame)
             .then((sent) => {
               if (sent)
                 setNotifications((items) =>
@@ -556,7 +559,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         if (found) {
           try {
             liveness = await verifyLiveness(frame.current);
-            if (liveness.live) present(found.student);
+            if (liveness.live) present(found.student, frame.current);
           } catch (livenessError) {
             console.warn("Liveness verification failed", livenessError);
             livenessFailed = true;
