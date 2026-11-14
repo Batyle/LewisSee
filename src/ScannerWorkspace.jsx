@@ -130,14 +130,12 @@ const verifyLiveness = async (canvas) => {
   return response.json();
 };
 const sendAttendanceEmail = async (student, record, attendancePhoto) => {
-  const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID?.trim();
-  const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID?.trim();
-  const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY?.trim();
+  const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID?.trim() || "service_sa8ojt8";
+  const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID?.trim() || "template_986zsnj";
+  const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY?.trim() || "8nvcTW8G6rXutzdGM";
   const recipient = student.email?.trim();
 
   if (!recipient) throw new Error("This student does not have an email address.");
-  if (!serviceId || !templateId || !publicKey)
-    throw new Error("EmailJS is not configured for this deployment.");
 
   const statusStyles = {
     Present: { color: "#087957", background: "#e6fbf5" },
@@ -148,6 +146,9 @@ const sendAttendanceEmail = async (student, record, attendancePhoto) => {
 
   await emailjs.send(serviceId, templateId, {
     to_email: recipient,
+    recipient_email: recipient,
+    student_email: recipient,
+    email: recipient,
     to_name: student.name,
     student_name: student.name,
     student_id: student.studentId,

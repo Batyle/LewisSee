@@ -8,6 +8,66 @@ import { getPool } from "./_lib/database.js";
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const respond = (res, code, body) => res.status(code).json(body);
 
+async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
+  const serviceId = process.env.ADMIN_EMAILJS_SERVICE_ID || "service_42lrlwk";
+  const templateId = process.env.ADMIN_EMAILJS_TEMPLATE_ID || "template_cgf0ftr";
+  const publicKey = process.env.ADMIN_EMAILJS_PUBLIC_KEY || "_OxeAtIVSYaPNqVhG";
+
+  try {
+    const [admins] = await pool.execute(
+      "SELECT email FROM admins WHERE role = 'admin' AND email <> ''",
+    );
+    if (!admins.length) {
+      console.warn("EmailJS instructor request notice skipped: no administrator email addresses are configured.");
+      return false;
+    }
+
+    const requestedBlocks = blocks
+      .map((block) => `${block.course} Year ${block.yearLevel}, Block ${block.block}`)
+      .join(", ") || "None selected";
+    const results = await Promise.all(admins.map(async (admin) => {
+      try {
+        const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            service_id: serviceId,
+            template_id: templateId,
+            user_id: publicKey,
+            template_params: {
+              to_email: admin.email,
+              recipient_email: admin.email,
+              email: admin.email,
+              to_name: "Administrator",
+              instructor_name: instructor.name,
+              instructor_email: instructor.email,
+              decision: "pending",
+              status: "pending",
+              instructor_id: "",
+              requested_blocks: requestedBlocks,
+              reply_to: instructor.email,
+              message: `${instructor.name} (${instructor.email}) submitted a new instructor access request. Requested blocks: ${requestedBlocks}. Review it in the LewisSee admin console.`,
+            },
+          }),
+        });
+        if (!emailResponse.ok) {
+          console.warn(`EmailJS instructor request notice failed with HTTP ${emailResponse.status}.`);
+          return false;
+        }
+        return true;
+      } catch (error) {
+        console.warn("EmailJS instructor request notice could not reach EmailJS.", error?.message || error);
+        return false;
+      }
+    }));
+
+    return results.every(Boolean);
+  } catch (error) {
+    console.warn("EmailJS instructor request notice could not be sent.", error?.message || error);
+    return false;
+  }
+}
+
 function getPath(req) {
   const rawPath = req.query?.path ?? new URL(req.url, "http://localhost").pathname.replace(/^\/api\/?/, "");
   const segments = Array.isArray(rawPath) ? rawPath : String(rawPath).split("/");
@@ -307,9 +367,17 @@ async function handleInstructorAuth(req, res, action, pool) {
       throw error;
     }
 
+    const notificationSent = await notifyAdminsOfInstructorRequest(
+      pool,
+      { name, email },
+      selected,
+    );
     return respond(res, 201, {
       instructor: { id: uid, uid, name, email, status: "pending" },
-      message: "Request submitted — you'll be notified once an admin reviews it.",
+      message: notificationSent
+        ? "Request submitted — an administrator has been notified. You'll be notified once your request is reviewed."
+        : "Request submitted, but we couldn't email the administrators. Your request is saved and visible in the admin console.",
+      notificationSent,
     });
   }
 

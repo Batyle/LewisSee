@@ -16,7 +16,7 @@ Each check-in is saved with its Philippine Standard Time and can be classified a
 - **Attendance history:** Search, sort, review, correct, and remove saved attendance records.
 - **Student enrollment:** Instructors can enroll students with a reference photo and class assignment.
 - **Instructor and administrator workspaces:** Instructors manage classroom attendance; administrators review instructor access requests and manage instructor accounts.
-- **Email notifications:** EmailJS can send check-in notifications to students with an email address on file. Administrator decisions and instructor account updates can also send email notifications when configured.
+- **Email notifications:** EmailJS can send check-in notifications to students with an email address on file, notify administrators when an instructor access request is submitted, and send instructors administrator decisions and account updates.
 - **Responsive interface:** The attendance and administration workflows adapt to mobile and desktop screens.
 
 ## 🛠️ Tech Stack
