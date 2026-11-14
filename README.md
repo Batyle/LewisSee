@@ -49,15 +49,7 @@ The interface responds to user and browser events to keep attendance workflows i
 - **Camera and lighting:** Face recognition works best with a usable camera, adequate lighting, and a clear view of the student's face.
 - **Liveness limitations:** Anti-spoofing reduces the risk of a still-image check-in but cannot guarantee detection of every advanced replay or deepfake.
 - **Biometric privacy:** Student reference photos and face descriptors are sensitive data. Limit access to authorized staff and protect the database and API credentials.
-- **Attendance email photos and status:** Live scans require a valid time policy for today's selected class session; without one, or outside its check-in window, no live attendance record or email is created. Students who never check in are not automatically marked absent or emailed. The student EmailJS template must have a **Variable Attachment** with parameter name `attendance_photo`, filename `attendance.jpg`, and content type `image/jpeg`. To show a colored status badge, include this HTML in the template:
-
-  ```html
-  <span style="display:inline-block;padding:10px 18px;border-radius:20px;color:{{status_color}};background:{{status_background}};font-weight:bold;">
-    {{attendance_status}}
-  </span>
-  ```
-
-  These fields highlight the result of a recognized, live-verified scan as Present, Late, or Absent. Students who do not scan are not automatically marked absent or emailed. The app attaches a compressed camera frame only after face recognition and liveness verification succeed. Obtain appropriate consent before enabling this feature and follow the institution's image-retention policy.
+- **Attendance email photos and status:** EmailJS sends a photo and Present/Late status only for recognized, live-verified scans during today's scheduled window. Students who do not scan are not automatically marked absent or emailed. Obtain consent before enabling photo attachments and follow the institution's image-retention policy.
 
 ## 👥 About the Creators
 
