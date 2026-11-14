@@ -19,6 +19,7 @@ import { NotificationConnection } from "./connection";
 import { loadAttendanceStore, saveAttendanceStore } from "./attendanceApi";
 import {
   determineAttendanceStatus,
+  formatClock12Hour,
   nowManilaTime,
   sessionTimeRanges,
   todayManila,
@@ -1212,7 +1213,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                   </div>
                   <div className="record-meta">
                     <AttendanceStatusBadge status={record.status || "Present"} />
-                    <time>{record.time}</time>
+                    <time>{formatClock12Hour(record.time)}</time>
                   </div>
                 </div>
               ))
@@ -1504,7 +1505,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
               {(historySearch || historySectionFilter || historySort !== "newest") && <button type="button" className="secondary-button clear-history-filters" onClick={() => { setHistorySearch(""); setHistorySectionFilter(""); setHistorySort("newest"); }}>Clear filters</button>}
             </div>
             <div className="history-table-wrap"><table><thead><tr><th>Student</th><th>Date</th><th>Class</th><th>Time-in</th><th>Status</th><th>Time-out</th><th>Actions</th></tr></thead><tbody>
-              {displayedHistory.map((record) => <tr key={record.id}><td><b>{record.name}</b><small>{record.studentId}</small></td><td>{formatDate(record.date)}</td><td>{record.section}</td><td>{record.time}</td><td><AttendanceStatusBadge status={record.status || "Present"} /></td><td>{record.timeOut || "—"}</td><td className="row-actions"><button type="button" className="secondary-button" onClick={() => editHistoryRecord(record)}>Edit</button><button type="button" className="danger-button" onClick={() => deleteHistoryRecord(record)}>Delete</button></td></tr>)}
+              {displayedHistory.map((record) => <tr key={record.id}><td><b>{record.name}</b><small>{record.studentId}</small></td><td>{formatDate(record.date)}</td><td>{record.section}</td><td>{formatClock12Hour(record.time)}</td><td><AttendanceStatusBadge status={record.status || "Present"} /></td><td>{record.timeOut ? formatClock12Hour(record.timeOut) : "—"}</td><td className="row-actions"><button type="button" className="secondary-button" onClick={() => editHistoryRecord(record)}>Edit</button><button type="button" className="danger-button" onClick={() => deleteHistoryRecord(record)}>Delete</button></td></tr>)}
               {!records.length && <tr><td colSpan="7" className="empty">No attendance records yet.</td></tr>}
               {!!records.length && !displayedHistory.length && <tr><td colSpan="7" className="empty">No records match your search or class filter.</td></tr>}
             </tbody></table></div>

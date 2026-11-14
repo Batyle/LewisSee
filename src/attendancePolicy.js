@@ -40,6 +40,16 @@ export const parseClockToMinutes = (value) => {
   return hours * 60 + minutes;
 };
 
+export const formatClock12Hour = (value) => {
+  const minutes = parseClockToMinutes(value);
+  if (minutes == null) return String(value ?? "");
+
+  const hour24 = Math.floor(minutes / 60);
+  const hour12 = hour24 % 12 || 12;
+  const minute = String(minutes % 60).padStart(2, "0");
+  return `${hour12}:${minute} ${hour24 < 12 ? "AM" : "PM"}`;
+};
+
 const clockAtMinutes = (minutes) => {
   const normalized = ((minutes % 1440) + 1440) % 1440;
   return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
