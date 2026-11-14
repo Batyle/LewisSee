@@ -122,7 +122,9 @@ const verifyLiveness = async (canvas) => {
 const sendAttendanceEmail = async (student, record) => {
   const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID?.trim();
   const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID?.trim();
-  const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY?.trim();
+  const publicKey =
+    import.meta.env.VITE_EMAILJS_PUBLIC_KEY?.trim() ||
+    import.meta.env.VITE_ADMIN_EMAILJS_PUBLIC_KEY?.trim();
   const recipient = student.email?.trim();
 
   if (!recipient) throw new Error("This student does not have an email address.");
