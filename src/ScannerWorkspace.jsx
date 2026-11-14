@@ -46,7 +46,17 @@ const DEFAULT_CLASSES = [
   { course: "BSIT", yearLevel: 3, block: "B" },
   { course: "BSCS", yearLevel: 2, block: "A" },
 ];
-const today = todayManila;
+const today = () => todayManila();
+const cloneSessionForDate = (session, nextDate) => {
+  if (!session) return null;
+  return {
+    ...session,
+    id: crypto.randomUUID(),
+    date: nextDate,
+    // A carried-forward manual session should be open for the new day.
+    ended: session.mode === "manual" ? false : Boolean(session.ended),
+  };
+};
 const formatDate = (value) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(value ?? ""));
   if (!match) return String(value ?? "");
@@ -186,7 +196,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [records, setRecords] = useState(() => read("attendance-records")),
     [classes, setClasses] = useState(() => read("attendance-classes")),
     [sessions, setSessions] = useState(() => read("attendance-sessions"));
-  const [date, setDate] = useState(today),
+  const [date, setDate] = useState(() => today()),
     [course, setCourse] = useState("BSIT"),
     [yearLevel, setYearLevel] = useState("3"),
     [block, setBlock] = useState("A"),
@@ -405,38 +415,91 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [date, section, sessions],
   );
   const activeSessionRef = useRef(activeSession);
+  const sessionsRef = useRef(sessions);
   const scanContextRef = useRef({ date, section, records });
   useLayoutEffect(() => {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
   useLayoutEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
+  useLayoutEffect(() => {
     scanContextRef.current = { date, section, records };
   }, [date, records, section]);
   const editingStudent = students.find((student) => student.studentId === editingId);
   const attendancePolicyReady = isAttendancePolicyReady(activeSession);
+  const ensureLiveSessionDate = useCallback((preferredSection = section) => {
+    const liveDate = todayManila();
+    const all = sessionsRef.current;
+    const existing =
+      all.find((item) => item.section === preferredSection && item.date === liveDate) || null;
+    const previous =
+      existing ||
+      all.find((item) => item.section === preferredSection && item.date === scanContextRef.current.date) ||
+      all
+        .filter((item) => item.section === preferredSection && item.date < liveDate)
+        .sort((left, right) => right.date.localeCompare(left.date))[0] ||
+      null;
+    const nextSession = existing || cloneSessionForDate(previous, liveDate);
+    if (!existing && nextSession) {
+      setSessions((current) => {
+        if (current.some((item) => item.section === preferredSection && item.date === liveDate)) {
+          return current;
+        }
+        return [...current, nextSession];
+      });
+      sessionsRef.current = [...all, nextSession];
+    }
+    setDate((current) => (current === liveDate ? current : liveDate));
+    scanContextRef.current = {
+      ...scanContextRef.current,
+      date: liveDate,
+      section: preferredSection,
+    };
+    if (nextSession && preferredSection === section) {
+      activeSessionRef.current = nextSession;
+    }
+    return { liveDate, session: nextSession };
+  }, [section]);
   const saveSessionPolicy = useCallback((nextSession) => {
+    // Live scanner check-ins are always for Manila "today". If the Date filter is
+    // still on yesterday after midnight, snap the saved policy to today so Update
+    // policy while scanning immediately unlocks attendance/email.
+    const liveDate = todayManila();
+    const normalized = {
+      ...nextSession,
+      date: nextSession.date && nextSession.date > liveDate ? nextSession.date : liveDate,
+    };
+    if (normalized.date === liveDate) {
+      setDate(liveDate);
+      scanContextRef.current = {
+        ...scanContextRef.current,
+        date: liveDate,
+        section: normalized.section,
+      };
+    }
     // Apply immediately so a running camera loop picks up scheduled→manual switches
     // without waiting for the next React render / stale requestAnimationFrame closure.
     const scan = scanContextRef.current;
-    if (nextSession.section === scan.section && nextSession.date === scan.date) {
-      activeSessionRef.current = nextSession;
+    if (normalized.section === scan.section && normalized.date === scan.date) {
+      activeSessionRef.current = normalized;
     }
     setSessions((all) => {
       const index = all.findIndex(
-        (item) => item.section === nextSession.section && item.date === nextSession.date,
+        (item) => item.section === normalized.section && item.date === normalized.date,
       );
       if (index >= 0) {
         const copy = [...all];
-        copy[index] = nextSession;
+        copy[index] = normalized;
         return copy;
       }
-      return [...all, nextSession];
+      return [...all, normalized];
     });
-    const ranges = sessionTimeRanges(nextSession);
+    const ranges = sessionTimeRanges(normalized);
     setRecords((all) =>
       all.map((record) => {
-        if (record.section !== nextSession.section || record.date !== nextSession.date) return record;
-        if (nextSession.mode === "manual") return { ...record, status: "Present" };
+        if (record.section !== normalized.section || record.date !== normalized.date) return record;
+        if (normalized.mode === "manual") return { ...record, status: "Present" };
         return {
           ...record,
           status: determineAttendanceStatus(
@@ -460,13 +523,19 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     setNotice(ended ? "Attendance ended for this class." : "Attendance resumed for this class.");
   }, [saveSessionPolicy]);
   const present = useCallback((student, frame) => {
-    const currentSession = activeSessionRef.current;
-    const { date: scanDate, section: scanSection, records: scanRecords } = scanContextRef.current;
+    const liveDate = todayManila();
+    let currentSession = activeSessionRef.current;
+    let { date: scanDate, section: scanSection, records: scanRecords } = scanContextRef.current;
+    if (scanDate !== liveDate && scanDate < liveDate) {
+      const synced = ensureLiveSessionDate(scanSection);
+      scanDate = synced.liveDate;
+      currentSession = synced.session || activeSessionRef.current;
+    }
     if (
       !isAttendancePolicyReady(currentSession) ||
       currentSession.section !== scanSection ||
       currentSession.date !== scanDate ||
-      scanDate !== todayManila()
+      scanDate !== liveDate
     )
       return;
     const scanTime = nowManilaTime();
@@ -555,7 +624,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           );
         });
     }
-  }, []);
+  }, [ensureLiveSessionDate]);
   const clearAttendanceActions = (record) => {
     const key = `${record.date}|${record.section}|${record.studentId}`;
     attendanceActions.current.delete(`in|${key}`);
@@ -602,10 +671,24 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         // Always read the live session from a ref. A requestAnimationFrame loop
         // keeps its closed-over values until restart, so scheduled→manual policy
         // updates would otherwise keep blocking check-ins/emails outside the old window.
-        const currentSession = activeSessionRef.current;
-        const { date: scanDate, section: scanSection, records: scanRecords } = scanContextRef.current;
+        const liveDate = todayManila();
+        let currentSession = activeSessionRef.current;
+        let { date: scanDate, section: scanSection, records: scanRecords } = scanContextRef.current;
+        // After midnight the Date filter can still be yesterday while the camera
+        // keeps running. Snap to Manila today and reuse yesterday's policy so
+        // check-ins/emails are not blocked by a stale session date.
+        if (scanDate !== liveDate && scanDate < liveDate) {
+          const synced = ensureLiveSessionDate(scanSection);
+          scanDate = synced.liveDate;
+          currentSession = synced.session || activeSessionRef.current;
+          scanContextRef.current = {
+            ...scanContextRef.current,
+            date: scanDate,
+            section: scanSection,
+          };
+        }
         const policyReady = isAttendancePolicyReady(currentSession);
-        const selectedDateIsToday = scanDate === todayManila();
+        const selectedDateIsToday = scanDate === liveDate;
         const attendancePhase =
           policyReady && selectedDateIsToday
             ? liveAttendancePhaseAt(nowManilaTime(), currentSession)
@@ -660,9 +743,11 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           message: policyUnavailable
             ? "Attendance time rules are not set for this class and date. No attendance record or email was created."
             : dateUnavailable
-              ? "Live attendance is available only on the session date. No attendance record or email was created."
+              ? `Live attendance is for today (${liveDate}). Switch the Date filter from ${scanDate} to today, then save the policy again.`
               : attendanceWindowClosed
-                ? "The attendance check-in window is not open or has ended. No attendance record or email was created."
+                ? currentSession?.mode === "manual"
+                  ? "Manual attendance has ended for this class. Press Resume attendance, then scan again."
+                  : "The attendance check-in window is not open or has ended. No attendance record or email was created."
                 : timeOutUnavailable
                   ? existingAttendance?.timeOut
                     ? `${found.student.name} has already checked out.`
@@ -694,7 +779,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         busy.current = false;
       }
     },
-    [debugMode, paint, present, ui],
+    [debugMode, ensureLiveSessionDate, paint, present, ui],
   );
   // Keep the live RAF loop on the latest callback after policy/date/roster changes.
   useEffect(() => {
@@ -703,11 +788,32 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     raf.current = requestAnimationFrame(loop);
     return undefined;
   }, [loop, ready]);
+  // Keep the scanner on Manila "today" so midnight does not freeze yesterday's date.
+  useEffect(() => {
+    if (page !== "scan") return undefined;
+    const sync = () => {
+      const liveDate = todayManila();
+      if (scanContextRef.current.date < liveDate) ensureLiveSessionDate(section);
+    };
+    sync();
+    const timer = setInterval(sync, 15000);
+    const onVisible = () => {
+      if (!document.hidden) sync();
+    };
+    addEventListener("visibilitychange", onVisible);
+    addEventListener("focus", onVisible);
+    return () => {
+      clearInterval(timer);
+      removeEventListener("visibilitychange", onVisible);
+      removeEventListener("focus", onVisible);
+    };
+  }, [ensureLiveSessionDate, page, section]);
   const start = useCallback(async () => {
     if (startingCamera.current) return;
     startingCamera.current = true;
     setCameraRequested(true);
     setCameraStarting(true);
+    ensureLiveSessionDate(section);
     stop();
     stopCamera(stream.current);
     stream.current = null;
@@ -794,7 +900,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       startingCamera.current = false;
       if (mounted.current) setCameraStarting(false);
     }
-  }, [loop, showError, stop]);
+  }, [ensureLiveSessionDate, loop, section, showError, stop]);
   useEffect(() => {
     mounted.current = true;
     return () => {

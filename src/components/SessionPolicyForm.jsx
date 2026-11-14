@@ -69,7 +69,11 @@ export default function SessionPolicyForm({
         timeOutStart: null,
         timeOutEnd: null,
       });
-      setMessage(session ? "Manual attendance settings updated." : "Manual attendance is ready.");
+      setMessage(
+        session
+          ? "Manual attendance is open for today. Keep scanning — check-ins and emails are unlocked."
+          : "Manual attendance is ready for today.",
+      );
       return;
     }
 
