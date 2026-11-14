@@ -932,25 +932,29 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                               ORDER BY session_date DESC, section""")
             sessions = []
             for row in cursor.fetchall():
+                mode = "manual" if row["attendance_mode"] == "manual" else "timed"
                 session = AttendanceSession(
                     id=row["id"],
                     section=row["section"],
                     date=row["date"],
                     requiredTimeIn=row["required_time_in"],
+                    timeInStart=row["required_time_in"],
                     timeInEnd=row["time_in_end"],
                     lateStart=row["late_start"],
                     lateEnd=row["late_end"],
                     gracePeriodMinutes=row["grace_period_minutes"],
                     lateThresholdMinutes=row["late_threshold_minutes"],
-                    mode=row["attendance_mode"],
-                    ended=bool(row["attendance_ended"]),
+                    mode=mode,
+                    ended=bool(mode == "manual" and row["attendance_ended"]),
                 )
                 if session.mode == "manual":
                     sessions.append({
                         "id": row["id"],
                         "section": row["section"],
                         "date": row["date"],
-                        "requiredTimeIn": row["required_time_in"],
+                        "requiredTimeIn": row["required_time_in"] or "00:00",
+                        "timeInStart": row["required_time_in"] or "00:00",
+                        "timeInEnd": row["time_in_end"] or "23:59",
                         "mode": session.mode,
                         "ended": session.ended,
                     })
@@ -1097,7 +1101,9 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                             session.section.strip(),
                             session.date,
                             format_time_hhmm(session.timeInStart or session.requiredTimeIn or "00:00"),
-                            format_time_hhmm(session.timeInEnd) if session.timeInEnd else None,
+                            format_time_hhmm(session.timeInEnd)
+                            if session.timeInEnd
+                            else ("23:59" if session.mode == "manual" else None),
                             format_time_hhmm(session.lateStart) if session.lateStart else None,
                             format_time_hhmm(session.lateEnd) if session.lateEnd else None,
                             session.gracePeriodMinutes,
@@ -1105,8 +1111,8 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                             format_time_hhmm(session.timeOutStart or session.timeOut)
                             if session.timeOutStart or session.timeOut else None,
                             format_time_hhmm(session.timeOutEnd) if session.timeOutEnd else None,
-                            session.mode,
-                            session.ended,
+                            "manual" if session.mode == "manual" else "timed",
+                            bool(session.mode == "manual" and session.ended),
                         )
                         for session in store.sessions
                     ],

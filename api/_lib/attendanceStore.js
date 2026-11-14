@@ -245,11 +245,13 @@ export async function loadAttendanceStore(pool) {
     block: row.block,
   }));
   const sessions = sessionRows.map((row) => {
+    const mode = row.attendance_mode === "manual" ? "manual" : "timed";
     const session = {
       id: row.id,
       section: row.section,
       date: row.date,
       requiredTimeIn: row.required_time_in,
+      timeInStart: row.required_time_in,
       timeInEnd: row.time_in_end,
       lateStart: row.late_start,
       lateEnd: row.late_end,
@@ -257,8 +259,8 @@ export async function loadAttendanceStore(pool) {
       lateThresholdMinutes: row.late_threshold_minutes,
       timeOut: row.time_out,
       timeOutEnd: row.time_out_end,
-      mode: row.attendance_mode,
-      ended: Boolean(row.attendance_ended),
+      mode,
+      ended: Boolean(mode === "manual" && row.attendance_ended),
     };
     if (session.mode === "manual") return session;
     const ranges = sessionTimeRanges(session);
@@ -276,8 +278,8 @@ export async function loadAttendanceStore(pool) {
       timeOut: row.time_out,
       timeOutStart: row.time_out_end ? row.time_out : null,
       timeOutEnd: row.time_out_end,
-      mode: row.attendance_mode,
-      ended: Boolean(row.attendance_ended),
+      mode,
+      ended: false,
     };
   });
 
@@ -437,20 +439,25 @@ export async function replaceAttendanceStore(pool, storeInput) {
          VALUES ?`,
         [store.sessions.map((session) => {
           const ranges = sessionTimeRanges(session);
+          const isManual = session.mode === "manual";
           return [
             session.id,
             String(session.section).trim(),
             formatMysqlDate(session.date),
-            formatTimeHhmm(ranges.timeInStart || session.timeInStart || session.requiredTimeIn || "00:00"),
-            formatTimeHhmm(ranges.timeInEnd),
-            formatTimeHhmm(ranges.lateStart),
-            formatTimeHhmm(ranges.lateEnd),
+            formatTimeHhmm(
+              ranges.timeInStart || session.timeInStart || session.requiredTimeIn || "00:00",
+            ),
+            formatTimeHhmm(
+              ranges.timeInEnd || session.timeInEnd || (isManual ? "23:59" : null),
+            ),
+            formatTimeHhmm(ranges.lateStart || session.lateStart),
+            formatTimeHhmm(ranges.lateEnd || session.lateEnd),
             session.gracePeriodMinutes ?? null,
             session.lateThresholdMinutes ?? null,
             formatTimeHhmm(session.timeOutStart || session.timeOut),
             formatTimeHhmm(session.timeOutEnd),
-            session.mode || "timed",
-            Boolean(session.ended),
+            isManual ? "manual" : "timed",
+            Boolean(isManual && session.ended),
           ];
         })],
       );

@@ -405,12 +405,22 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [date, section, sessions],
   );
   const activeSessionRef = useRef(activeSession);
+  const scanContextRef = useRef({ date, section, records });
   useLayoutEffect(() => {
     activeSessionRef.current = activeSession;
   }, [activeSession]);
+  useLayoutEffect(() => {
+    scanContextRef.current = { date, section, records };
+  }, [date, records, section]);
   const editingStudent = students.find((student) => student.studentId === editingId);
   const attendancePolicyReady = isAttendancePolicyReady(activeSession);
   const saveSessionPolicy = useCallback((nextSession) => {
+    // Apply immediately so a running camera loop picks up scheduled→manual switches
+    // without waiting for the next React render / stale requestAnimationFrame closure.
+    const scan = scanContextRef.current;
+    if (nextSession.section === scan.section && nextSession.date === scan.date) {
+      activeSessionRef.current = nextSession;
+    }
     setSessions((all) => {
       const index = all.findIndex(
         (item) => item.section === nextSession.section && item.date === nextSession.date,
@@ -441,99 +451,83 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     );
   }, []);
   const toggleManualAttendance = useCallback(() => {
-    if (!activeSession || activeSession.mode !== "manual") return;
-    const ended = !activeSession.ended;
-    const nextSession = { ...activeSession, ended };
+    const currentSession = activeSessionRef.current;
+    if (!currentSession || currentSession.mode !== "manual") return;
+    const ended = !currentSession.ended;
+    const nextSession = { ...currentSession, ended };
     activeSessionRef.current = nextSession;
     saveSessionPolicy(nextSession);
     setNotice(ended ? "Attendance ended for this class." : "Attendance resumed for this class.");
-  }, [activeSession, saveSessionPolicy]);
-  const present = useCallback(
-    (student, frame) => {
-      const currentSession = activeSessionRef.current;
-      if (
-        !isAttendancePolicyReady(currentSession) ||
-        currentSession.section !== section ||
-        currentSession.date !== date ||
-        date !== todayManila()
-      )
+  }, [saveSessionPolicy]);
+  const present = useCallback((student, frame) => {
+    const currentSession = activeSessionRef.current;
+    const { date: scanDate, section: scanSection, records: scanRecords } = scanContextRef.current;
+    if (
+      !isAttendancePolicyReady(currentSession) ||
+      currentSession.section !== scanSection ||
+      currentSession.date !== scanDate ||
+      scanDate !== todayManila()
+    )
+      return;
+    const scanTime = nowManilaTime();
+    const phase = liveAttendancePhaseAt(scanTime, currentSession);
+    if (!phase) return;
+    const attendanceKey = `${scanDate}|${scanSection}|${student.studentId}`;
+    const existingRecord = scanRecords.find(
+      (record) =>
+        record.studentId === student.studentId &&
+        record.date === scanDate &&
+        record.section === scanSection,
+    );
+    if (phase === "TimeOut") {
+      const actionKey = `out|${attendanceKey}`;
+      if (!existingRecord || existingRecord.timeOut || attendanceActions.current.has(actionKey))
         return;
-      const scanTime = nowManilaTime();
-      const phase = liveAttendancePhaseAt(scanTime, currentSession);
-      if (!phase) return;
-      const attendanceKey = `${date}|${section}|${student.studentId}`;
-      const existingRecord = records.find(
-        (record) =>
-          record.studentId === student.studentId &&
-          record.date === date &&
-          record.section === section,
-      );
-      if (phase === "TimeOut") {
-        const actionKey = `out|${attendanceKey}`;
-        if (!existingRecord || existingRecord.timeOut || attendanceActions.current.has(actionKey))
-          return;
-        attendanceActions.current.add(actionKey);
-        const record = { ...existingRecord, timeOut: scanTime };
-        setRecords((all) =>
-          all.map((item) => item.id === record.id ? record : item),
-        );
-        socket.current?.send({ type: "attendance", id: record.id, record });
-        return;
-      }
-
-      const actionKey = `in|${attendanceKey}`;
-      if (existingRecord || attendanceActions.current.has(actionKey)) return;
       attendanceActions.current.add(actionKey);
-      const record = {
-        id: crypto.randomUUID(),
-        studentId: student.studentId,
-        name: student.name,
-        date,
-        section,
-        time: scanTime,
-        status: phase,
-        timeOut: null,
-      };
+      const record = { ...existingRecord, timeOut: scanTime };
       setRecords((all) =>
-        all.some(
-          (item) =>
-            item.studentId === student.studentId &&
-            item.date === date &&
-            item.section === section,
-        )
-          ? all
-          : [...all, record],
+        all.map((item) => item.id === record.id ? record : item),
       );
       socket.current?.send({ type: "attendance", id: record.id, record });
-      if (!emailedRecords.current.has(record.id)) {
-        emailedRecords.current.add(record.id);
-        const attendancePhoto = frame.toDataURL("image/jpeg", 0.65);
-        void sendAttendanceEmail(student, record, attendancePhoto)
-          .then((sent) => {
-            if (sent) {
-              const notificationId = `email-${record.id}`;
-              setNotifications((items) =>
-                [
-                  {
-                    id: notificationId,
-                    message: `Attendance email sent to ${student.name}.`,
-                  },
-                  ...items,
-                ].slice(0, 4),
-              );
-              setTimeout(
-                () => setNotifications((items) => items.filter((item) => item.id !== notificationId)),
-                3000,
-              );
-            }
-          })
-          .catch((error) => {
-            const notificationId = `email-error-${record.id}`;
+      return;
+    }
+
+    const actionKey = `in|${attendanceKey}`;
+    if (existingRecord || attendanceActions.current.has(actionKey)) return;
+    attendanceActions.current.add(actionKey);
+    const record = {
+      id: crypto.randomUUID(),
+      studentId: student.studentId,
+      name: student.name,
+      date: scanDate,
+      section: scanSection,
+      time: scanTime,
+      status: phase,
+      timeOut: null,
+    };
+    setRecords((all) =>
+      all.some(
+        (item) =>
+          item.studentId === student.studentId &&
+          item.date === scanDate &&
+          item.section === scanSection,
+      )
+        ? all
+        : [...all, record],
+    );
+    socket.current?.send({ type: "attendance", id: record.id, record });
+    if (!emailedRecords.current.has(record.id)) {
+      emailedRecords.current.add(record.id);
+      const attendancePhoto = frame.toDataURL("image/jpeg", 0.65);
+      void sendAttendanceEmail(student, record, attendancePhoto)
+        .then((sent) => {
+          if (sent) {
+            const notificationId = `email-${record.id}`;
             setNotifications((items) =>
               [
                 {
                   id: notificationId,
-                  message: `Attendance saved for ${student.name}. ${emailErrorMessage(error)}`,
+                  message: `Attendance email sent to ${student.name}.`,
                 },
                 ...items,
               ].slice(0, 4),
@@ -542,11 +536,26 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
               () => setNotifications((items) => items.filter((item) => item.id !== notificationId)),
               3000,
             );
-          });
-      }
-    },
-    [date, records, section],
-  );
+          }
+        })
+        .catch((error) => {
+          const notificationId = `email-error-${record.id}`;
+          setNotifications((items) =>
+            [
+              {
+                id: notificationId,
+                message: `Attendance saved for ${student.name}. ${emailErrorMessage(error)}`,
+              },
+              ...items,
+            ].slice(0, 4),
+          );
+          setTimeout(
+            () => setNotifications((items) => items.filter((item) => item.id !== notificationId)),
+            3000,
+          );
+        });
+    }
+  }, []);
   const clearAttendanceActions = (record) => {
     const key = `${record.date}|${record.section}|${record.studentId}`;
     attendanceActions.current.delete(`in|${key}`);
@@ -590,18 +599,24 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         const found = matches.find(Boolean);
         let liveness;
         let livenessFailed = false;
-        const selectedDateIsToday = date === todayManila();
+        // Always read the live session from a ref. A requestAnimationFrame loop
+        // keeps its closed-over values until restart, so scheduled→manual policy
+        // updates would otherwise keep blocking check-ins/emails outside the old window.
+        const currentSession = activeSessionRef.current;
+        const { date: scanDate, section: scanSection, records: scanRecords } = scanContextRef.current;
+        const policyReady = isAttendancePolicyReady(currentSession);
+        const selectedDateIsToday = scanDate === todayManila();
         const attendancePhase =
-          attendancePolicyReady && selectedDateIsToday
-            ? liveAttendancePhaseAt(nowManilaTime(), activeSession)
+          policyReady && selectedDateIsToday
+            ? liveAttendancePhaseAt(nowManilaTime(), currentSession)
             : null;
-        const policyUnavailable = Boolean(found) && !attendancePolicyReady;
-        const dateUnavailable = Boolean(found) && attendancePolicyReady && !selectedDateIsToday;
-        const existingAttendance = found && records.find(
+        const policyUnavailable = Boolean(found) && !policyReady;
+        const dateUnavailable = Boolean(found) && policyReady && !selectedDateIsToday;
+        const existingAttendance = found && scanRecords.find(
           (record) =>
             record.studentId === found.student.studentId &&
-            record.date === date &&
-            record.section === section,
+            record.date === scanDate &&
+            record.section === scanSection,
         );
         const timeOutUnavailable =
           Boolean(found) &&
@@ -609,7 +624,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           (!existingAttendance || existingAttendance.timeOut);
         const attendanceWindowClosed =
           Boolean(found) &&
-          attendancePolicyReady &&
+          policyReady &&
           selectedDateIsToday &&
           !attendancePhase;
         if (found) {
@@ -679,8 +694,15 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         busy.current = false;
       }
     },
-    [activeSession, attendancePolicyReady, date, debugMode, paint, present, records, section, ui],
+    [debugMode, paint, present, ui],
   );
+  // Keep the live RAF loop on the latest callback after policy/date/roster changes.
+  useEffect(() => {
+    if (!ready || !running.current) return undefined;
+    cancelAnimationFrame(raf.current);
+    raf.current = requestAnimationFrame(loop);
+    return undefined;
+  }, [loop, ready]);
   const start = useCallback(async () => {
     if (startingCamera.current) return;
     startingCamera.current = true;

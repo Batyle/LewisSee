@@ -59,7 +59,9 @@ export default function SessionPolicyForm({
         section,
         date,
         mode: "manual",
-        ended: session?.ended || false,
+        // Switching from scheduled → manual must open attendance immediately.
+        // Only preserve "ended" when the session was already manual.
+        ended: session?.mode === "manual" ? Boolean(session.ended) : false,
         timeInStart: "00:00",
         timeInEnd: "23:59",
         lateStart: null,
