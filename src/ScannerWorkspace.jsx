@@ -1196,6 +1196,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             {match && (
               <div className="capture-overlay">
                 <b>{match.student.name}</b>
+                <small>Student ID: {match.student.studentId}</small>
                 <span>Recognized</span>
               </div>
             )}
