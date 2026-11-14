@@ -15,14 +15,17 @@ export async function sendInstructorDecisionEmail(instructor, decision) {
   const message = approved
     ? `Your instructor access request has been approved. Your instructor ID is ${instructor.instructorId || "being assigned"}. You can now sign in to LewisSee.`
     : "Your instructor access request has been denied.";
+  const recipient = instructor.email.trim();
 
   return emailjs.send(
     ADMIN_EMAILJS_SERVICE_ID,
     ADMIN_EMAILJS_TEMPLATE_ID,
     {
-      to_email: instructor.email,
+      to_email: recipient,
+      recipient_email: recipient,
       to_name: instructor.name,
-      email: replyTo || "",
+      email: recipient,
+      reply_to: replyTo || recipient,
       instructor_name: instructor.name,
       decision,
       status: approved ? "active" : "rejected",
@@ -40,14 +43,17 @@ export async function sendInstructorUpdateEmail(instructor, changedFields) {
   if (!instructor.email?.trim()) {
     throw new Error("The instructor account has no email address.");
   }
+  const recipient = instructor.email.trim();
 
   return emailjs.send(
     ADMIN_EMAILJS_SERVICE_ID,
     templateId,
     {
-      to_email: instructor.email,
+      to_email: recipient,
+      recipient_email: recipient,
       to_name: instructor.name,
-      email: replyTo || "",
+      email: recipient,
+      reply_to: replyTo || recipient,
       instructor_name: instructor.name,
       instructor_id: instructor.instructorId || "",
       decision: "updated",
