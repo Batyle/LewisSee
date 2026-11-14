@@ -12,9 +12,12 @@ export async function sendInstructorDecisionEmail(instructor, decision) {
   }
 
   const approved = decision === "approved";
+  const suspended = decision === "suspended";
   const message = approved
     ? `Your instructor access request has been approved. Your instructor ID is ${instructor.instructorId || "being assigned"}. You can now sign in to LewisSee.`
-    : "Your instructor access request has been denied.";
+    : suspended
+      ? "Your LewisSee instructor account has been suspended. Please contact an administrator for assistance."
+      : "Your instructor access request has been denied.";
   const recipient = instructor.email.trim();
 
   return emailjs.send(
@@ -28,7 +31,7 @@ export async function sendInstructorDecisionEmail(instructor, decision) {
       reply_to: replyTo || recipient,
       instructor_name: instructor.name,
       decision,
-      status: approved ? "active" : "rejected",
+      status: approved ? "active" : suspended ? "suspended" : "rejected",
       instructor_id: instructor.instructorId || "",
       message,
       reason: instructor.rejectionReason || "",

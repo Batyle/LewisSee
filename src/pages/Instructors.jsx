@@ -325,7 +325,7 @@ export default function Instructors() {
                       type="button"
                       className="admin-action-reject"
                       disabled={busyUid === person.uid}
-                      onClick={() => runAction(person.uid, () => suspendInstructor(person.uid))}
+                      onClick={() => runAction(person.uid, () => suspendInstructor(person.uid), "suspended")}
                     >
                       Suspend
                     </button>

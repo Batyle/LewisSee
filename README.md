@@ -12,7 +12,7 @@ Each check-in is saved with its Philippine Standard Time and can be classified a
 
 - **Facial attendance:** Recognizes enrolled students in the classroom workspace and records a check-in once per student, class, and date.
 - **Liveness detection:** A Python service checks the camera frame for signs of a live face before a scan is recorded. This helps deter still-photo attempts but is not a guarantee against every spoofing method.
-- **Time-based attendance policies:** Instructors can create start/end ranges for on-time check-in, an optional late period, and optional time-out. Live check-ins are accepted only during the saved Present or Late windows and only on the session date; scans before or after those windows do not create records or send emails. A verified scan during the configured time-out window records the student's check-out without sending another email. Status boundaries use Philippine Standard Time.
+- **Attendance policies:** Instructors can use scheduled check-in/late/time-out windows or choose manual attendance, which stays open for the selected date until they press **Attendance ends**. Live scans are accepted only for the session date; valid check-ins send email notifications. Scheduled status boundaries use Philippine Standard Time.
 - **Attendance history:** Search, sort, review, correct, and remove saved attendance records.
 - **Student enrollment:** Instructors can enroll students with a reference photo and class assignment.
 - **Instructor and administrator workspaces:** Instructors manage classroom attendance; administrators review instructor access requests and manage instructor accounts.

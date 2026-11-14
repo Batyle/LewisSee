@@ -123,6 +123,8 @@ class AttendanceSession(BaseModel):
     gracePeriodMinutes: int | None = Field(default=None, ge=0, le=240)
     lateThresholdMinutes: int | None = Field(default=None, ge=0, le=720)
     timeOut: str | None = Field(default=None, max_length=8)
+    mode: str = Field(default="timed", pattern=r"^(timed|manual)$")
+    ended: bool = False
 
 
 class AttendanceStore(BaseModel):
@@ -183,6 +185,8 @@ def add_minutes_to_clock(value: Any, minutes: int) -> str | None:
 
 
 def session_time_ranges(session: AttendanceSession) -> tuple[str | None, str | None, str | None, str | None]:
+    if session.mode == "manual":
+        return None, None, None, None
     time_in_start = session.timeInStart or session.requiredTimeIn
     if session.timeInEnd:
         time_in_end = session.timeInEnd
@@ -230,6 +234,8 @@ def resolve_record_status(record: AttendanceRecord, sessions_by_key: dict[tuple[
     session = sessions_by_key.get((record.section.strip().casefold(), record.date))
     if not session:
         return record.status if record.status in {"Present", "Late", "Absent"} else "Present"
+    if session.mode == "manual":
+        return "Present"
     return determine_attendance_status(record.time, *session_time_ranges(session))
 
 
@@ -450,6 +456,8 @@ def ensure_schema(connection: Any) -> None:
               late_threshold_minutes INT UNSIGNED NULL,
               time_out TIME NULL,
               time_out_end TIME NULL,
+              attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed',
+              attendance_ended BOOLEAN NOT NULL DEFAULT FALSE,
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
               UNIQUE KEY one_session_per_class_day (section, session_date),
@@ -461,6 +469,14 @@ def ensure_schema(connection: Any) -> None:
         for column in ("time_in_end", "late_start", "late_end", "time_out_end"):
             if column not in session_columns:
                 cursor.execute(f"ALTER TABLE attendance_sessions ADD COLUMN {column} TIME NULL")
+        if "attendance_mode" not in session_columns:
+            cursor.execute(
+                "ALTER TABLE attendance_sessions ADD COLUMN attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed'"
+            )
+        if "attendance_ended" not in session_columns:
+            cursor.execute(
+                "ALTER TABLE attendance_sessions ADD COLUMN attendance_ended BOOLEAN NOT NULL DEFAULT FALSE"
+            )
 
 
 def jwt_secret() -> str:
@@ -910,7 +926,8 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                               TIME_FORMAT(late_start, '%H:%i') AS late_start,
                               TIME_FORMAT(late_end, '%H:%i') AS late_end,
                               TIME_FORMAT(time_out, '%H:%i') AS time_out,
-                              TIME_FORMAT(time_out_end, '%H:%i') AS time_out_end
+                              TIME_FORMAT(time_out_end, '%H:%i') AS time_out_end,
+                              attendance_mode, attendance_ended
                               FROM attendance_sessions
                               ORDER BY session_date DESC, section""")
             sessions = []
@@ -925,7 +942,19 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                     lateEnd=row["late_end"],
                     gracePeriodMinutes=row["grace_period_minutes"],
                     lateThresholdMinutes=row["late_threshold_minutes"],
+                    mode=row["attendance_mode"],
+                    ended=bool(row["attendance_ended"]),
                 )
+                if session.mode == "manual":
+                    sessions.append({
+                        "id": row["id"],
+                        "section": row["section"],
+                        "date": row["date"],
+                        "requiredTimeIn": row["required_time_in"],
+                        "mode": session.mode,
+                        "ended": session.ended,
+                    })
+                    continue
                 time_in_start, time_in_end, late_start, late_end = session_time_ranges(session)
                 sessions.append({
                     "id": row["id"],
@@ -941,6 +970,8 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                     "timeOut": row["time_out"],
                     "timeOutStart": row["time_out"] if row["time_out_end"] else None,
                     "timeOutEnd": row["time_out_end"],
+                    "mode": session.mode,
+                    "ended": session.ended,
                 })
     return {"students": students, "records": records, "classes": classes, "sessions": sessions}
 
@@ -995,6 +1026,9 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
         key = (session.section.strip().casefold(), session.date)
         if key in session_keys:
             raise HTTPException(status_code=422, detail="Duplicate attendance sessions are not allowed.")
+        if session.mode == "manual":
+            session_keys.add(key)
+            continue
         time_in_start, time_in_end, late_start, late_end = session_time_ranges(session)
         start = parse_clock_time(time_in_start)
         end = parse_clock_time(time_in_end)
@@ -1055,14 +1089,14 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                     """INSERT INTO attendance_sessions
                     (id, section, session_date, required_time_in, time_in_end,
                      late_start, late_end, grace_period_minutes, late_threshold_minutes,
-                     time_out, time_out_end)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                     time_out, time_out_end, attendance_mode, attendance_ended)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     [
                         (
                             session.id,
                             session.section.strip(),
                             session.date,
-                            format_time_hhmm(session.timeInStart or session.requiredTimeIn),
+                            format_time_hhmm(session.timeInStart or session.requiredTimeIn or "00:00"),
                             format_time_hhmm(session.timeInEnd) if session.timeInEnd else None,
                             format_time_hhmm(session.lateStart) if session.lateStart else None,
                             format_time_hhmm(session.lateEnd) if session.lateEnd else None,
@@ -1071,6 +1105,8 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                             format_time_hhmm(session.timeOutStart or session.timeOut)
                             if session.timeOutStart or session.timeOut else None,
                             format_time_hhmm(session.timeOutEnd) if session.timeOutEnd else None,
+                            session.mode,
+                            session.ended,
                         )
                         for session in store.sessions
                     ],

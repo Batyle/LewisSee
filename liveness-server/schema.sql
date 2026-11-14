@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   CONSTRAINT attendance_status_check CHECK (status IN ('Present', 'Late', 'Absent'))
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- Time-based attendance policy for a class session (one per section + date).
+-- Attendance policy for one class session (one per section + date).
 CREATE TABLE IF NOT EXISTS attendance_sessions (
   id VARCHAR(64) PRIMARY KEY,
   section VARCHAR(191) NOT NULL,
@@ -80,6 +80,9 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
   grace_period_minutes INT UNSIGNED NULL,
   late_threshold_minutes INT UNSIGNED NULL,
   time_out TIME NULL,
+  time_out_end TIME NULL,
+  attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed',
+  attendance_ended BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   UNIQUE KEY one_session_per_class_day (section, session_date),
@@ -100,6 +103,78 @@ SET @sql := (
     ),
     'SELECT 1',
     'ALTER TABLE instructors ADD COLUMN instructor_id VARCHAR(12) NULL AFTER uid'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'time_in_end'
+    ),
+    'SELECT 1',
+    'ALTER TABLE attendance_sessions ADD COLUMN time_in_end TIME NULL'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'late_start'
+    ),
+    'SELECT 1',
+    'ALTER TABLE attendance_sessions ADD COLUMN late_start TIME NULL'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'late_end'
+    ),
+    'SELECT 1',
+    'ALTER TABLE attendance_sessions ADD COLUMN late_end TIME NULL'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'time_out_end'
+    ),
+    'SELECT 1',
+    'ALTER TABLE attendance_sessions ADD COLUMN time_out_end TIME NULL'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'attendance_mode'
+    ),
+    'SELECT 1',
+    'ALTER TABLE attendance_sessions ADD COLUMN attendance_mode VARCHAR(16) NOT NULL DEFAULT ''timed'''
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'attendance_ended'
+    ),
+    'SELECT 1',
+    'ALTER TABLE attendance_sessions ADD COLUMN attendance_ended BOOLEAN NOT NULL DEFAULT FALSE'
   )
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

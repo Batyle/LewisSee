@@ -1,4 +1,4 @@
-﻿import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import emailjs from "@emailjs/browser";
 import {
   cameraErrorMessage,
@@ -448,6 +448,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     () => sessions.find((item) => item.section === section && item.date === date) || null,
     [date, section, sessions],
   );
+  const activeSessionRef = useRef(activeSession);
+  useLayoutEffect(() => {
+    activeSessionRef.current = activeSession;
+  }, [activeSession]);
   const editingStudent = students.find((student) => student.studentId === editingId);
   const attendancePolicyReady = isAttendancePolicyReady(activeSession);
   const saveSessionPolicy = useCallback((nextSession) => {
@@ -466,6 +470,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     setRecords((all) =>
       all.map((record) => {
         if (record.section !== nextSession.section || record.date !== nextSession.date) return record;
+        if (nextSession.mode === "manual") return { ...record, status: "Present" };
         return {
           ...record,
           status: determineAttendanceStatus(
@@ -479,11 +484,26 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       }),
     );
   }, []);
+  const toggleManualAttendance = useCallback(() => {
+    if (!activeSession || activeSession.mode !== "manual") return;
+    const ended = !activeSession.ended;
+    const nextSession = { ...activeSession, ended };
+    activeSessionRef.current = nextSession;
+    saveSessionPolicy(nextSession);
+    setNotice(ended ? "Attendance ended for this class." : "Attendance resumed for this class.");
+  }, [activeSession, saveSessionPolicy]);
   const present = useCallback(
     (student, frame) => {
-      if (!isAttendancePolicyReady(activeSession) || date !== todayManila()) return;
+      const currentSession = activeSessionRef.current;
+      if (
+        !isAttendancePolicyReady(currentSession) ||
+        currentSession.section !== section ||
+        currentSession.date !== date ||
+        date !== todayManila()
+      )
+        return;
       const scanTime = nowManilaTime();
-      const phase = liveAttendancePhaseAt(scanTime, activeSession);
+      const phase = liveAttendancePhaseAt(scanTime, currentSession);
       if (!phase) return;
       const attendanceKey = `${date}|${section}|${student.studentId}`;
       const existingRecord = records.find(
@@ -569,7 +589,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           });
       }
     },
-    [activeSession, date, records, section],
+    [date, records, section],
   );
   const clearAttendanceActions = (record) => {
     const key = `${record.date}|${record.section}|${record.studentId}`;
@@ -1046,7 +1066,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       section: sectionValue,
       timeOut: historyDraft.timeOut?.trim() || null,
       status: policy
-        ? determineAttendanceStatus(
+        ? policy.mode === "manual"
+          ? "Present"
+          : determineAttendanceStatus(
             historyDraft.time.trim(),
             policyRanges.timeInStart,
             policyRanges.timeInEnd,
@@ -1274,6 +1296,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         date={date}
         session={activeSession}
         onSave={saveSessionPolicy}
+        onEnd={toggleManualAttendance}
         disabled={!cloudLoaded}
       />
       <section className="attendance-grid">

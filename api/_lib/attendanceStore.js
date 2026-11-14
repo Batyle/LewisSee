@@ -30,6 +30,9 @@ function formatTimeHhmm(value) {
 }
 
 function sessionTimeRanges(session) {
+  if (session.mode === "manual") {
+    return { timeInStart: null, timeInEnd: null, lateStart: null, lateEnd: null };
+  }
   const timeInStart = session.timeInStart || session.requiredTimeIn;
   const start = parseClockToMinutes(timeInStart);
   const isLegacy = !session.timeInEnd;
@@ -71,6 +74,7 @@ function determineAttendanceStatus(currentScanTime, timeInStart, timeInEnd, late
 function resolveRecordStatus(record, sessionsByKey) {
   const session = sessionsByKey.get(`${record.section.trim().toLowerCase()}|${record.date}`);
   if (!session) return ["Present", "Late", "Absent"].includes(record.status) ? record.status : "Present";
+  if (session.mode === "manual") return "Present";
   const ranges = sessionTimeRanges(session);
   return determineAttendanceStatus(
     record.time,
@@ -133,6 +137,8 @@ export async function ensureAttendanceSchema(pool) {
       late_threshold_minutes INT UNSIGNED NULL,
       time_out TIME NULL,
       time_out_end TIME NULL,
+      attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed',
+      attendance_ended BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY one_session_per_class_day (section, session_date),
@@ -172,6 +178,12 @@ export async function ensureAttendanceSchema(pool) {
       await pool.query(`ALTER TABLE attendance_sessions ADD COLUMN ${column} TIME NULL`);
     }
   }
+  if (!sessionFields.has("attendance_mode")) {
+    await pool.query("ALTER TABLE attendance_sessions ADD COLUMN attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed'");
+  }
+  if (!sessionFields.has("attendance_ended")) {
+    await pool.query("ALTER TABLE attendance_sessions ADD COLUMN attendance_ended BOOLEAN NOT NULL DEFAULT FALSE");
+  }
 }
 
 function formatMysqlDate(value) {
@@ -201,7 +213,8 @@ export async function loadAttendanceStore(pool) {
            TIME_FORMAT(late_start, '%H:%i') AS late_start,
            TIME_FORMAT(late_end, '%H:%i') AS late_end,
            TIME_FORMAT(time_out, '%H:%i') AS time_out,
-           TIME_FORMAT(time_out_end, '%H:%i') AS time_out_end
+           TIME_FORMAT(time_out_end, '%H:%i') AS time_out_end,
+           attendance_mode, attendance_ended
     FROM attendance_sessions
     ORDER BY session_date DESC, section
   `);
@@ -244,7 +257,10 @@ export async function loadAttendanceStore(pool) {
       lateThresholdMinutes: row.late_threshold_minutes,
       timeOut: row.time_out,
       timeOutEnd: row.time_out_end,
+      mode: row.attendance_mode,
+      ended: Boolean(row.attendance_ended),
     };
+    if (session.mode === "manual") return session;
     const ranges = sessionTimeRanges(session);
     return {
       id: row.id,
@@ -260,6 +276,8 @@ export async function loadAttendanceStore(pool) {
       timeOut: row.time_out,
       timeOutStart: row.time_out_end ? row.time_out : null,
       timeOutEnd: row.time_out_end,
+      mode: row.attendance_mode,
+      ended: Boolean(row.attendance_ended),
     };
   });
 
@@ -354,6 +372,15 @@ export async function replaceAttendanceStore(pool, storeInput) {
       error.statusCode = 422;
       throw error;
     }
+    if (!["timed", "manual"].includes(session.mode || "timed")) {
+      const error = new Error("Attendance session mode must be timed or manual.");
+      error.statusCode = 422;
+      throw error;
+    }
+    if (session.mode === "manual") {
+      sessionKeys.add(key);
+      continue;
+    }
     const ranges = sessionTimeRanges(session);
     const start = parseClockToMinutes(ranges.timeInStart);
     const end = parseClockToMinutes(ranges.timeInEnd);
@@ -406,7 +433,7 @@ export async function replaceAttendanceStore(pool, storeInput) {
         `INSERT INTO attendance_sessions
           (id, section, session_date, required_time_in, time_in_end,
            late_start, late_end, grace_period_minutes, late_threshold_minutes,
-           time_out, time_out_end)
+           time_out, time_out_end, attendance_mode, attendance_ended)
          VALUES ?`,
         [store.sessions.map((session) => {
           const ranges = sessionTimeRanges(session);
@@ -414,7 +441,7 @@ export async function replaceAttendanceStore(pool, storeInput) {
             session.id,
             String(session.section).trim(),
             formatMysqlDate(session.date),
-            formatTimeHhmm(ranges.timeInStart),
+            formatTimeHhmm(ranges.timeInStart || session.timeInStart || session.requiredTimeIn || "00:00"),
             formatTimeHhmm(ranges.timeInEnd),
             formatTimeHhmm(ranges.lateStart),
             formatTimeHhmm(ranges.lateEnd),
@@ -422,6 +449,8 @@ export async function replaceAttendanceStore(pool, storeInput) {
             session.lateThresholdMinutes ?? null,
             formatTimeHhmm(session.timeOutStart || session.timeOut),
             formatTimeHhmm(session.timeOutEnd),
+            session.mode || "timed",
+            Boolean(session.ended),
           ];
         })],
       );

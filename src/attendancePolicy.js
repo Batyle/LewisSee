@@ -84,6 +84,16 @@ const clockAtMinutes = (minutes) => {
 };
 
 export const sessionTimeRanges = (session) => {
+  if (session.mode === "manual") {
+    return {
+      timeInStart: null,
+      timeInEnd: null,
+      lateStart: null,
+      lateEnd: null,
+      timeOutStart: null,
+      timeOutEnd: null,
+    };
+  }
   const timeInStart = session.timeInStart || session.requiredTimeIn;
   const start = parseClockToMinutes(timeInStart);
   const isLegacy = !session.timeInEnd;
@@ -116,6 +126,7 @@ export const sessionTimeRanges = (session) => {
 
 export const isAttendancePolicyReady = (session) => {
   if (!session) return false;
+  if (session.mode === "manual") return true;
 
   const {
     timeInStart,
@@ -152,6 +163,7 @@ export const isAttendancePolicyReady = (session) => {
 
 export const liveAttendancePhaseAt = (currentTime, session) => {
   if (!isAttendancePolicyReady(session)) return null;
+  if (session.mode === "manual") return session.ended ? null : "Present";
 
   const scan = parseClockToMinutes(currentTime);
   const { timeInStart, timeInEnd, lateStart, lateEnd, timeOutStart, timeOutEnd } =
@@ -209,6 +221,7 @@ export const statusForRecord = (record, sessions = []) => {
     (item) => item.section === record.section && item.date === record.date,
   );
   if (!session) return record.status || "Present";
+  if (session.mode === "manual") return "Present";
   const ranges = sessionTimeRanges(session);
   return determineAttendanceStatus(
     record.time,

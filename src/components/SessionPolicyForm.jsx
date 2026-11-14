@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { parseClockToMinutes, sessionTimeRanges } from "../attendancePolicy";
 
 const emptyDraft = {
+  mode: "timed",
   timeInStart: "08:00",
   timeInEnd: "08:15",
   lateStart: "08:16",
@@ -14,6 +15,7 @@ const getDraft = (session) => {
   if (!session) return emptyDraft;
   const ranges = sessionTimeRanges(session);
   return {
+    mode: session.mode || "timed",
     timeInStart: ranges.timeInStart || "08:00",
     timeInEnd: ranges.timeInEnd || "08:15",
     lateStart: ranges.lateStart || "",
@@ -31,6 +33,7 @@ export default function SessionPolicyForm({
   date,
   session = null,
   onSave,
+  onEnd,
   disabled = false,
 }) {
   const [draft, setDraft] = useState(emptyDraft);
@@ -47,6 +50,24 @@ export default function SessionPolicyForm({
     event.preventDefault();
     if (!section || !date) {
       setMessage("Choose a class and date before saving the policy.");
+      return;
+    }
+
+    if (draft.mode === "manual") {
+      onSave({
+        id: session?.id || crypto.randomUUID(),
+        section,
+        date,
+        mode: "manual",
+        ended: session?.ended || false,
+        timeInStart: "00:00",
+        timeInEnd: "23:59",
+        lateStart: null,
+        lateEnd: null,
+        timeOutStart: null,
+        timeOutEnd: null,
+      });
+      setMessage(session ? "Manual attendance settings updated." : "Manual attendance is ready.");
       return;
     }
 
@@ -98,6 +119,8 @@ export default function SessionPolicyForm({
       id: session?.id || crypto.randomUUID(),
       section,
       date,
+      mode: "timed",
+      ended: false,
       timeInStart: draft.timeInStart,
       timeInEnd: draft.timeInEnd,
       lateStart: hasLateStart ? draft.lateStart : null,
@@ -112,90 +135,115 @@ export default function SessionPolicyForm({
     <form className="session-policy-form management-card" onSubmit={submit}>
       <div className="section-title">
         <div>
-          <p className="eyebrow">TIME-BASED POLICY</p>
+          <p className="eyebrow">ATTENDANCE POLICY</p>
           <h2>{session ? "Edit session rules" : "Set session rules"}</h2>
         </div>
       </div>
       <p className="muted session-policy-meta">
         {section || "No class"} · {date || "No date"} · Asia/Manila (PST)
       </p>
-      <p className="muted session-policy-help">
-        Live scans create records and send email only after these rules are saved.
-        Live check-ins are accepted only during the saved Time-in or Late windows.
-        Outside those periods the scanner will not save a record or send an email.
-        A verified scan during an optional Time-out window records a check-out only.
-      </p>
-      <div className="session-policy-grid">
-        <fieldset className="session-policy-range">
-          <legend>Time-in</legend>
-          <label>
-            Start
-            <input
-              type="time"
-              required
-              disabled={disabled}
-              value={draft.timeInStart}
-              onChange={(event) => update("timeInStart", event.target.value)}
-            />
-          </label>
-          <label>
-            End
-            <input
-              type="time"
-              required
-              disabled={disabled}
-              value={draft.timeInEnd}
-              onChange={(event) => update("timeInEnd", event.target.value)}
-            />
-          </label>
-        </fieldset>
-        <fieldset className="session-policy-range">
-          <legend>Late period (optional)</legend>
-          <label>
-            Start
-            <input
-              type="time"
-              disabled={disabled}
-              value={draft.lateStart}
-              onChange={(event) => update("lateStart", event.target.value)}
-            />
-          </label>
-          <label>
-            End
-            <input
-              type="time"
-              disabled={disabled}
-              value={draft.lateEnd}
-              onChange={(event) => update("lateEnd", event.target.value)}
-            />
-          </label>
-        </fieldset>
-        <fieldset className="session-policy-range">
-          <legend>Time-out (optional)</legend>
-          <label>
-            Start
-            <input
-              type="time"
-              disabled={disabled}
-              value={draft.timeOutStart}
-              onChange={(event) => update("timeOutStart", event.target.value)}
-            />
-          </label>
-          <label>
-            End
-            <input
-              type="time"
-              disabled={disabled}
-              value={draft.timeOutEnd}
-              onChange={(event) => update("timeOutEnd", event.target.value)}
-            />
-          </label>
-        </fieldset>
-      </div>
+      <label className="session-policy-mode">
+        Attendance mode
+        <select
+          disabled={disabled}
+          value={draft.mode}
+          onChange={(event) => update("mode", event.target.value)}
+        >
+          <option value="timed">Scheduled times</option>
+          <option value="manual">Manual end button</option>
+        </select>
+      </label>
+      {draft.mode === "manual" ? (
+        <p className="muted session-policy-help">
+          Save this policy to allow verified check-ins at any time today. Use the
+          “Attendance ends” button to stop accepting attendance for this class.
+        </p>
+      ) : (
+        <>
+          <p className="muted session-policy-help">
+            Live scans create records and send email only after these rules are saved.
+            Live check-ins are accepted only during the saved Time-in or Late windows.
+            Outside those periods the scanner will not save a record or send an email.
+            A verified scan during an optional Time-out window records a check-out only.
+          </p>
+          <div className="session-policy-grid">
+            <fieldset className="session-policy-range">
+              <legend>Time-in</legend>
+              <label>
+                Start
+                <input
+                  type="time"
+                  required
+                  disabled={disabled}
+                  value={draft.timeInStart}
+                  onChange={(event) => update("timeInStart", event.target.value)}
+                />
+              </label>
+              <label>
+                End
+                <input
+                  type="time"
+                  required
+                  disabled={disabled}
+                  value={draft.timeInEnd}
+                  onChange={(event) => update("timeInEnd", event.target.value)}
+                />
+              </label>
+            </fieldset>
+            <fieldset className="session-policy-range">
+              <legend>Late period (optional)</legend>
+              <label>
+                Start
+                <input
+                  type="time"
+                  disabled={disabled}
+                  value={draft.lateStart}
+                  onChange={(event) => update("lateStart", event.target.value)}
+                />
+              </label>
+              <label>
+                End
+                <input
+                  type="time"
+                  disabled={disabled}
+                  value={draft.lateEnd}
+                  onChange={(event) => update("lateEnd", event.target.value)}
+                />
+              </label>
+            </fieldset>
+            <fieldset className="session-policy-range">
+              <legend>Time-out (optional)</legend>
+              <label>
+                Start
+                <input
+                  type="time"
+                  disabled={disabled}
+                  value={draft.timeOutStart}
+                  onChange={(event) => update("timeOutStart", event.target.value)}
+                />
+              </label>
+              <label>
+                End
+                <input
+                  type="time"
+                  disabled={disabled}
+                  value={draft.timeOutEnd}
+                  onChange={(event) => update("timeOutEnd", event.target.value)}
+                />
+              </label>
+            </fieldset>
+          </div>
+        </>
+      )}
       <div className="form-actions">
         <button type="submit" disabled={disabled}>
           {session ? "Update policy" : "Save policy"}
         </button>
+        {session?.mode === "manual" && onEnd && (
+          <button type="button" className="secondary-button" disabled={disabled} onClick={onEnd}>
+            {session.ended ? "Resume attendance" : "Attendance ends"}
+          </button>
+        )}
       </div>
       {message && <p className="enroll-message">{message}</p>}
     </form>

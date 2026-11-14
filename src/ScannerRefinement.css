@@ -356,6 +356,25 @@ body:has(.attendance-app) {
   margin: 0 0 14px;
 }
 
+.attendance-app .session-policy-mode {
+  display: grid;
+  gap: 6px;
+  max-width: 320px;
+  margin-bottom: 14px;
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.attendance-app .session-policy-mode select {
+  min-height: 40px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+
 .attendance-app .session-policy-help {
   margin: 0 0 14px;
   font-size: 0.85rem;
