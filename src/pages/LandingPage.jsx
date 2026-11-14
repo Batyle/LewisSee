@@ -101,6 +101,7 @@ export default function LandingPage() {
             <a href="#features">Features</a>
             <a href="#how-it-works">How it works</a>
             <a href="#security">Security</a>
+            <Link to="/about">Creators</Link>
           </nav>
           <Link className="landing-sign-in" to="/login">
             Sign in <ArrowIcon />
@@ -248,6 +249,7 @@ export default function LandingPage() {
           <span>Lewis<span>See</span></span>
         </Link>
         <p>© {new Date().getFullYear()} The Lewis College · Smart attendance system</p>
+        <Link className="landing-about-link" to="/about">About the creators</Link>
         <a href="#top">Back to top ↑</a>
       </footer>
     </main>

@@ -8,6 +8,7 @@ import Notifications from "./pages/Notifications";
 import InstructorAccess from "./pages/InstructorAccess";
 import AttendanceHome from "./pages/AttendanceHome";
 import LandingPage from "./pages/LandingPage";
+import AboutCreators from "./pages/AboutCreators";
 import IntroAnimation from "./components/IntroAnimation";
 
 export default function App() {
@@ -15,6 +16,7 @@ export default function App() {
     <>
       <Routes>
         <Route path="/" element={<LandingPage />} />
+        <Route path="/about" element={<AboutCreators />} />
         <Route path="/instructor" element={<InstructorAccess />} />
         <Route path="/login" element={<InstructorAccess />} />
         <Route element={<InstructorProtectedRoute />}>
