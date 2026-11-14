@@ -213,6 +213,11 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [historySearch, setHistorySearch] = useState(""),
     [historySectionFilter, setHistorySectionFilter] = useState(""),
     [historySort, setHistorySort] = useState("newest"),
+    [studentSearch, setStudentSearch] = useState(""),
+    [studentCourseFilter, setStudentCourseFilter] = useState(""),
+    [studentYearFilter, setStudentYearFilter] = useState(""),
+    [studentBlockFilter, setStudentBlockFilter] = useState(""),
+    [studentSort, setStudentSort] = useState("name"),
     [enrolling, setEnrolling] = useState(false),
     [isEnrollmentOpen, setEnrollmentOpen] = useState(false);
   const [editingId, setEditingId] = useState(null),
@@ -1228,6 +1233,53 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     () => students.filter((student) => belongsToClass(student, course, yearLevel, block)),
     [block, course, students, yearLevel],
   );
+  const directoryClasses = useMemo(() => {
+    const seen = new Set();
+    return [...activeClasses, ...students]
+      .filter((item) => item.course && item.yearLevel && item.block)
+      .filter((item) => {
+        const key = `${item.course}|${item.yearLevel}|${item.block}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+  }, [activeClasses, students]);
+  const directoryCourses = useMemo(
+    () => [...new Set(directoryClasses.map((item) => item.course))].sort((a, b) => a.localeCompare(b)),
+    [directoryClasses],
+  );
+  const directoryYears = useMemo(
+    () => [...new Set(directoryClasses
+      .filter((item) => !studentCourseFilter || item.course === studentCourseFilter)
+      .map((item) => String(item.yearLevel)))].sort((a, b) => Number(a) - Number(b)),
+    [directoryClasses, studentCourseFilter],
+  );
+  const directoryBlocks = useMemo(
+    () => [...new Set(directoryClasses
+      .filter((item) => !studentCourseFilter || item.course === studentCourseFilter)
+      .filter((item) => !studentYearFilter || String(item.yearLevel) === studentYearFilter)
+      .map((item) => item.block))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true })),
+    [directoryClasses, studentCourseFilter, studentYearFilter],
+  );
+  const displayedStudents = useMemo(() => {
+    const query = studentSearch.trim().toLocaleLowerCase();
+    const filtered = students.filter((student) =>
+      (!query || `${student.name} ${student.studentId} ${student.email || ""} ${classLabel(student)}`.toLocaleLowerCase().includes(query)) &&
+      (!studentCourseFilter || student.course === studentCourseFilter) &&
+      (!studentYearFilter || String(student.yearLevel) === studentYearFilter) &&
+      (!studentBlockFilter || student.block === studentBlockFilter),
+    );
+    return filtered.sort((left, right) => {
+      if (studentSort === "class") {
+        return String(left.course).localeCompare(String(right.course)) ||
+          Number(left.yearLevel) - Number(right.yearLevel) ||
+          String(left.block).localeCompare(String(right.block), undefined, { numeric: true }) ||
+          left.name.localeCompare(right.name);
+      }
+      if (studentSort === "studentId") return left.studentId.localeCompare(right.studentId);
+      return left.name.localeCompare(right.name);
+    });
+  }, [studentBlockFilter, studentCourseFilter, studentSearch, studentSort, studentYearFilter, students]);
   if (!startupDismissed && !cloudLoaded) {
     return (
       <LoadingScreen
@@ -1483,6 +1535,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           <div>
             <p className="eyebrow">STUDENT DIRECTORY</p>
             <h2>Student directory</h2>
+            <p className="student-directory-count">{displayedStudents.length} of {students.length} students</p>
           </div>
           <button type="button" onClick={() => {
             selectPortraitFile(null, setFile, setFilePreview, filePreviewUrl);
@@ -1490,6 +1543,77 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           }}>
             Enroll student
           </button>
+        </div>
+        <div className="student-directory-controls">
+          <label>
+            Search
+            <input
+              type="search"
+              placeholder="Name, student ID, email, or class"
+              value={studentSearch}
+              onChange={(event) => setStudentSearch(event.target.value)}
+            />
+          </label>
+          <label>
+            Course
+            <select
+              value={studentCourseFilter}
+              onChange={(event) => {
+                setStudentCourseFilter(event.target.value);
+                setStudentYearFilter("");
+                setStudentBlockFilter("");
+              }}
+            >
+              <option value="">All courses</option>
+              {directoryCourses.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            Year
+            <select
+              value={studentYearFilter}
+              onChange={(event) => {
+                setStudentYearFilter(event.target.value);
+                setStudentBlockFilter("");
+              }}
+            >
+              <option value="">All years</option>
+              {directoryYears.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            Block
+            <select
+              value={studentBlockFilter}
+              onChange={(event) => setStudentBlockFilter(event.target.value)}
+            >
+              <option value="">All blocks</option>
+              {directoryBlocks.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            Sort by
+            <select value={studentSort} onChange={(event) => setStudentSort(event.target.value)}>
+              <option value="name">Student name</option>
+              <option value="class">Course, year &amp; block</option>
+              <option value="studentId">Student ID</option>
+            </select>
+          </label>
+          {(studentSearch || studentCourseFilter || studentYearFilter || studentBlockFilter || studentSort !== "name") && (
+            <button
+              type="button"
+              className="secondary-button clear-student-filters"
+              onClick={() => {
+                setStudentSearch("");
+                setStudentCourseFilter("");
+                setStudentYearFilter("");
+                setStudentBlockFilter("");
+                setStudentSort("name");
+              }}
+            >
+              Clear filters
+            </button>
+          )}
         </div>
         {isEnrollmentOpen && (
           <div className="student-modal-backdrop" role="presentation">
@@ -1598,7 +1722,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         )}
         {notice && <p className="enroll-message">{notice}</p>}
         <div className="directory-list">
-          {studentsForClass.map((student) => (
+          {displayedStudents.map((student) => (
             <div className="student-row" key={student.studentId}>
               <span className="directory-photo">
                 {student.photo ? (
@@ -1627,6 +1751,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
               </button>
             </div>
           ))}
+          {!students.length && <p className="empty">No students enrolled yet.</p>}
+          {!!students.length && !displayedStudents.length && (
+            <p className="empty">No students match the selected search or filters.</p>
+          )}
         </div>
         {editingId && (
           <div className="student-modal-backdrop" role="presentation">

@@ -145,6 +145,30 @@ body:has(.attendance-app) {
   background: var(--chip);
 }
 
+.attendance-app .student-directory-count {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+.attendance-app .student-directory-controls {
+  display: grid;
+  grid-template-columns: minmax(180px, 1.6fr) repeat(3, minmax(100px, 1fr)) minmax(150px, 1.3fr) auto;
+  align-items: end;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.attendance-app .student-directory-controls input,
+.attendance-app .student-directory-controls select {
+  width: 100%;
+  min-width: 0;
+}
+
+.attendance-app .clear-student-filters {
+  white-space: nowrap;
+}
+
 .attendance-app .student-modal {
   width: min(100%, 700px);
   max-height: calc(100dvh - 48px);
@@ -509,6 +533,10 @@ body:has(.attendance-app) {
     font-size: clamp(1.65rem, 8vw, 2rem);
   }
 
+  .attendance-app .student-directory-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .attendance-app .filters {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -606,6 +634,10 @@ body:has(.attendance-app) {
 
   .attendance-app .history-controls,
   .attendance-app .history-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .attendance-app .student-directory-controls {
     grid-template-columns: minmax(0, 1fr);
   }
 
