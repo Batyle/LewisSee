@@ -104,8 +104,8 @@ export default function Instructors() {
       let actionNotice = result.message || "Instructor updated.";
       if (emailDecision && result.instructor) {
         try {
-          const emailResponse = await sendInstructorDecisionEmail(result.instructor, emailDecision);
-          actionNotice += ` EmailJS accepted the notification for ${result.instructor.email} (HTTP ${emailResponse.status}); this does not confirm inbox delivery. Check EmailJS Email History and the recipient's spam folder.`;
+          await sendInstructorDecisionEmail(result.instructor, emailDecision);
+          actionNotice += ` Email notification submitted for ${result.instructor.email}. If it does not arrive, check the EmailJS template recipient setting and Email History.`;
         } catch (cause) {
           const emailError = cause?.text
             ? `EmailJS returned HTTP ${cause.status}: ${cause.text}`
