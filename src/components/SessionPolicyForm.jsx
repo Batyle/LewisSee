@@ -115,6 +115,7 @@ export default function SessionPolicyForm({
         {section || "No class"} · {date || "No date"} · Asia/Manila (PST)
       </p>
       <p className="muted session-policy-help">
+        Live scans create records and send email only after these rules are saved.
         Scans during Time-in are Present; scans during the optional Late period are Late.
         Scans outside those periods are Absent.
       </p>

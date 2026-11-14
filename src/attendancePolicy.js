@@ -79,6 +79,21 @@ export const sessionTimeRanges = (session) => {
   return { timeInStart, timeInEnd, lateStart, lateEnd };
 };
 
+export const isAttendancePolicyReady = (session) => {
+  if (!session) return false;
+
+  const { timeInStart, timeInEnd, lateStart, lateEnd } = sessionTimeRanges(session);
+  const start = parseClockToMinutes(timeInStart);
+  const end = parseClockToMinutes(timeInEnd);
+  if (start == null || end == null || end <= start) return false;
+  if (!lateStart && !lateEnd) return true;
+  if (!lateStart || !lateEnd) return false;
+
+  const lateFrom = parseClockToMinutes(lateStart);
+  const lateUntil = parseClockToMinutes(lateEnd);
+  return lateFrom != null && lateUntil != null && lateFrom > end && lateUntil >= lateFrom;
+};
+
 export const determineAttendanceStatus = (
   currentScanTime,
   timeInStart,

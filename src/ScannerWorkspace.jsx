@@ -20,6 +20,7 @@ import { loadAttendanceStore, saveAttendanceStore } from "./attendanceApi";
 import {
   determineAttendanceStatus,
   formatClock12Hour,
+  isAttendancePolicyReady,
   nowManilaTime,
   sessionTimeRanges,
   todayManila,
@@ -119,7 +120,7 @@ const verifyLiveness = async (canvas) => {
   if (!response.ok) throw new Error(`Liveness service returned ${response.status}.`);
   return response.json();
 };
-const sendAttendanceEmail = async (student, record, frame) => {
+const sendAttendanceEmail = async (student, record, attendancePhoto) => {
   const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID?.trim();
   const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID?.trim();
   const publicKey =
@@ -131,7 +132,12 @@ const sendAttendanceEmail = async (student, record, frame) => {
   if (!serviceId || !templateId || !publicKey)
     throw new Error("EmailJS is not configured for this deployment.");
 
-  const attendancePhoto = frame.toDataURL("image/jpeg", 0.65);
+  const statusStyles = {
+    Present: { color: "#087957", background: "#e6fbf5" },
+    Late: { color: "#9a5700", background: "#fff3d6" },
+    Absent: { color: "#b42318", background: "#ffebe9" },
+  }[record.status];
+  if (!statusStyles) throw new Error("Attendance status is invalid; the email was not sent.");
 
   await emailjs.send(serviceId, templateId, {
     to_email: recipient,
@@ -141,7 +147,10 @@ const sendAttendanceEmail = async (student, record, frame) => {
     class_name: record.section,
     attendance_date: record.date,
     attendance_time: formatClock12Hour(record.time),
-    message: "Your attendance has been recorded. A photo from the verified check-in is attached.",
+    attendance_status: record.status,
+    status_color: statusStyles.color,
+    status_background: statusStyles.background,
+    message: `Your attendance was recorded as ${record.status}. A photo from the verified face scan is attached.`,
     attendance_photo: attendancePhoto,
   }, {
     publicKey,
@@ -424,6 +433,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     () => sessions.find((item) => item.section === section && item.date === date) || null,
     [date, section, sessions],
   );
+  const attendancePolicyReady = isAttendancePolicyReady(activeSession);
   const saveSessionPolicy = useCallback((nextSession) => {
     setSessions((all) => {
       const index = all.findIndex(
@@ -454,7 +464,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     );
   }, []);
   const present = useCallback(
-    (student, frame) =>
+    (student, attendancePhoto) => {
+      if (!isAttendancePolicyReady(activeSession)) return;
       setRecords((all) => {
         if (
           all.some(
@@ -466,16 +477,14 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         )
           return all;
         const scanTime = nowManilaTime();
-        const ranges = activeSession ? sessionTimeRanges(activeSession) : null;
-        const status = activeSession
-          ? determineAttendanceStatus(
-              scanTime,
-              ranges.timeInStart,
-              ranges.timeInEnd,
-              ranges.lateStart,
-              ranges.lateEnd,
-            )
-          : "Present";
+        const ranges = sessionTimeRanges(activeSession);
+        const status = determineAttendanceStatus(
+          scanTime,
+          ranges.timeInStart,
+          ranges.timeInEnd,
+          ranges.lateStart,
+          ranges.lateEnd,
+        );
         const record = {
           id: crypto.randomUUID(),
           studentId: student.studentId,
@@ -489,7 +498,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         socket.current?.send({ type: "attendance", id: record.id, record });
         if (!emailedRecords.current.has(record.id)) {
           emailedRecords.current.add(record.id);
-          void sendAttendanceEmail(student, record, frame)
+          void sendAttendanceEmail(student, record, attendancePhoto)
             .then((sent) => {
               if (sent)
                 setNotifications((items) =>
@@ -515,7 +524,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             );
         }
         return [...all, record];
-      }),
+      });
+    },
     [activeSession, date, section],
   );
   const loop = useCallback(
@@ -556,13 +566,19 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         const found = matches.find(Boolean);
         let liveness;
         let livenessFailed = false;
+        const policyUnavailable = Boolean(found) && !attendancePolicyReady;
         if (found) {
-          try {
-            liveness = await verifyLiveness(frame.current);
-            if (liveness.live) present(found.student, frame.current);
-          } catch (livenessError) {
-            console.warn("Liveness verification failed", livenessError);
-            livenessFailed = true;
+          if (!policyUnavailable) {
+            try {
+              liveness = await verifyLiveness(frame.current);
+              if (liveness.live) {
+                const attendancePhoto = frame.current.toDataURL("image/jpeg", 0.65);
+                present(found.student, attendancePhoto);
+              }
+            } catch (livenessError) {
+              console.warn("Liveness verification failed", livenessError);
+              livenessFailed = true;
+            }
           }
         }
         // Show the matched student even if liveness is offline, so that an
@@ -577,17 +593,19 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           count: detected.length,
           match: liveness?.live ? found : null,
           name: liveness?.live ? found?.student.name : undefined,
-          message: found && liveness?.live
-            ? `${found.student.name} recognized and verified live.`
-            : found && liveness && !liveness.live
-              ? "Photo or screen detected — attendance was not recorded."
-              : found && livenessFailed
-                ? "Liveness service unavailable — attendance is blocked."
-              : found
-                ? "Face recognized. Waiting for the liveness service."
-            : detected.length
-              ? "Face found, but no enrolled student matched."
-              : "Looking for a face…",
+          message: policyUnavailable
+            ? "Attendance time rules are not set for this class and date. No attendance record or email was created."
+            : found && liveness?.live
+              ? `${found.student.name} recognized and verified live.`
+              : found && liveness && !liveness.live
+                ? "Photo or screen detected — attendance was not recorded."
+                : found && livenessFailed
+                  ? "Liveness service unavailable — attendance is blocked."
+                  : found
+                    ? "Face recognized. Waiting for the liveness service."
+                    : detected.length
+                      ? "Face found, but no enrolled student matched."
+                      : "Looking for a face…",
         });
         const spent = performance.now() - start;
         interval.current = Math.max(1000 / TARGET_FPS, spent * 1.15);
@@ -602,7 +620,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         busy.current = false;
       }
     },
-    [debugMode, paint, present, ui],
+    [attendancePolicyReady, debugMode, paint, present, ui],
   );
   const start = useCallback(async () => {
     if (startingCamera.current) return;
