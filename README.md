@@ -63,13 +63,13 @@ LewisSee was developed by Group 7 for The Lewis College. The team members contri
       Works with attendance data and the MySQL database to support reliable data storage and retrieval.
     </td>
     <td align="center" width="33%">
-      <img src="assets/creators/luige-dela-torre.jpg" alt="Luige Dela Torre" width="180" /><br />
+      <img src="assets/creators/luige-dela-torre-corrected.jpg" alt="Luige Dela Torre" width="180" /><br />
       <strong>Luige Dela Torre</strong><br />
       <em>Frontend/Backend Integration</em><br />
       Connects the React frontend with backend services and helps bring the system's attendance workflows together.
     </td>
     <td align="center" width="33%">
-      <img src="assets/creators/je-an-fombuena.jpg" alt="Je An Fombuena" width="180" /><br />
+      <img src="assets/creators/je-an-fombuena-corrected.jpg" alt="Je An Fombuena" width="180" /><br />
       <strong>Je An Fombuena</strong><br />
       <em>Frontend System Design, UI, and Documentation</em><br />
       Contributes to the interface and user experience, and documents the system and its workflows.

@@ -1,8 +1,8 @@
 import { Link } from "react-router-dom";
 import LewisSeeLogo from "../components/LewisSeeLogo";
 import austinPhoto from "../../assets/creators/austin-dominic-valladolid.png";
-import luigePhoto from "../../assets/creators/luige-dela-torre.jpg";
-import jeAnPhoto from "../../assets/creators/je-an-fombuena.jpg";
+import luigePhoto from "../../assets/creators/luige-dela-torre-corrected.jpg";
+import jeAnPhoto from "../../assets/creators/je-an-fombuena-corrected.jpg";
 import "./LandingPage.css";
 import "./AboutCreators.css";
 
