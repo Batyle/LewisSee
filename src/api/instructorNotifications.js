@@ -1,7 +1,7 @@
 import emailjs from "@emailjs/browser";
 
-const ADMIN_EMAILJS_SERVICE_ID = import.meta.env.VITE_ADMIN_EMAILJS_SERVICE_ID?.trim() || "service_42lrlwk";
-const ADMIN_EMAILJS_TEMPLATE_ID = import.meta.env.VITE_ADMIN_EMAILJS_TEMPLATE_ID?.trim() || "template_cgf0ftr";
+export const ADMIN_EMAILJS_SERVICE_ID = import.meta.env.VITE_ADMIN_EMAILJS_SERVICE_ID?.trim() || "service_42lrlwk";
+export const ADMIN_EMAILJS_TEMPLATE_ID = import.meta.env.VITE_ADMIN_EMAILJS_TEMPLATE_ID?.trim() || "template_cgf0ftr";
 const ADMIN_EMAILJS_PUBLIC_KEY = import.meta.env.VITE_ADMIN_EMAILJS_PUBLIC_KEY?.trim() || "_OxeAtIVSYaPNqVhG";
 
 export async function sendInstructorDecisionEmail(instructor, decision) {

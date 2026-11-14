@@ -8,6 +8,8 @@ import {
   updateInstructor,
 } from "../api/adminApi";
 import {
+  ADMIN_EMAILJS_SERVICE_ID,
+  ADMIN_EMAILJS_TEMPLATE_ID,
   sendInstructorDecisionEmail,
   sendInstructorUpdateEmail,
 } from "../api/instructorNotifications";
@@ -107,10 +109,14 @@ export default function Instructors() {
           await sendInstructorDecisionEmail(result.instructor, emailDecision);
           actionNotice += ` Email notification submitted for ${result.instructor.email}. If it does not arrive, check the EmailJS template recipient setting and Email History.`;
         } catch (cause) {
-          const emailError = cause?.text
-            ? `EmailJS returned HTTP ${cause.status}: ${cause.text}`
-            : cause.message || "EmailJS error.";
-          actionNotice += ` The account was updated, but EmailJS rejected the notification: ${emailError}`;
+          if (cause?.status === 400 && /template id not found/i.test(cause?.text || "")) {
+            actionNotice += ` The account was updated, but EmailJS cannot find template ${ADMIN_EMAILJS_TEMPLATE_ID}. In EmailJS, confirm this exact template exists in the account for the configured public key and is connected to service ${ADMIN_EMAILJS_SERVICE_ID}.`;
+          } else {
+            const emailError = cause?.text
+              ? `EmailJS returned HTTP ${cause.status}: ${cause.text}`
+              : cause.message || "EmailJS error.";
+            actionNotice += ` The account was updated, but EmailJS rejected the notification: ${emailError}`;
+          }
         }
       }
       setNotice(actionNotice);
