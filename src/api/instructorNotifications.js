@@ -5,7 +5,7 @@ export const ADMIN_EMAILJS_SERVICE_ID = "service_42lrlwk";
 export const ADMIN_EMAILJS_TEMPLATE_ID = "template_cgf0ftr";
 const ADMIN_EMAILJS_PUBLIC_KEY = "_OxeAtIVSYaPNqVhG";
 
-function buildDecisionParams(instructor, decision) {
+function buildDecisionParams(instructor, decision, password = "") {
   const approved = decision === "approved";
   const suspended = decision === "suspended";
   const recipient = instructor.email.trim();
@@ -26,6 +26,7 @@ function buildDecisionParams(instructor, decision) {
     decision,
     status: approved ? "active" : suspended ? "suspended" : "rejected",
     instructor_id: instructor.instructorId || "",
+    password: password || (approved ? "Use the password you set during registration" : ""),
     message,
     reason: instructor.rejectionReason || "",
   };
@@ -44,7 +45,7 @@ export async function sendInstructorDecisionEmail(instructor, decision) {
   );
 }
 
-export async function sendInstructorUpdateEmail(instructor, changedFields) {
+export async function sendInstructorUpdateEmail(instructor, changedFields, password = "") {
   if (!instructor.email?.trim()) {
     throw new Error("The instructor account has no email address.");
   }
@@ -62,6 +63,7 @@ export async function sendInstructorUpdateEmail(instructor, changedFields) {
       reply_to: replyTo,
       instructor_name: instructor.name,
       instructor_id: instructor.instructorId || "",
+      password: password || "Unchanged — use your existing password",
       decision: "updated",
       status: instructor.status,
       reason: "",

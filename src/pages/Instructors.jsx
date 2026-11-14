@@ -163,7 +163,7 @@ export default function Instructors() {
           actionNotice += ` Email notification sent to ${result.instructor.email}.`;
         } else {
           try {
-            await sendInstructorUpdateEmail(result.instructor, changedFields);
+            await sendInstructorUpdateEmail(result.instructor, changedFields, editForm.newPassword);
             actionNotice += ` Email notification sent to ${result.instructor.email}.`;
           } catch (cause) {
             actionNotice += ` The account was updated, but the email could not be sent: ${result.emailError || cause.message || "EmailJS error."}`;
@@ -404,7 +404,7 @@ export default function Instructors() {
                 onChange={(event) => setEditForm({ ...editForm, newPassword: event.target.value })}
               />
             </label>
-            <small className="admin-instructor-edit-note">For security, the password is hashed and never included in the email. Let the instructor know their new password through a secure channel.</small>
+            <small className="admin-instructor-edit-note">If you set a new password, it will be included in the notification email along with the instructor name and ID.</small>
             <div className="admin-person-actions">
               <button type="button" className="admin-refresh" disabled={Boolean(busyUid)} onClick={() => setEditingInstructor(null)}>Cancel</button>
               <button type="submit" className="admin-action-approve" disabled={Boolean(busyUid)}>

@@ -66,13 +66,14 @@ async function notifyInstructorDecision(instructor, decision, req) {
     decision,
     status: approved ? "active" : suspended ? "suspended" : "rejected",
     instructor_id: instructor.instructorId || "",
+    password: approved ? "Use the password you set during registration" : "",
     message,
     reason: instructor.rejectionReason || "",
   }, req);
   return true;
 }
 
-async function notifyInstructorUpdate(instructor, changedFields, req) {
+async function notifyInstructorUpdate(instructor, changedFields, req, password = "") {
   if (!instructor?.email?.trim() || !changedFields?.length) return false;
   const recipient = instructor.email.trim();
   await sendAdminEmailJs({
@@ -83,6 +84,7 @@ async function notifyInstructorUpdate(instructor, changedFields, req) {
     reply_to: recipient,
     instructor_name: instructor.name,
     instructor_id: instructor.instructorId || "",
+    password: password || "Unchanged — use your existing password",
     decision: "updated",
     status: instructor.status,
     reason: "",
@@ -365,7 +367,7 @@ async function handleAdmin(req, res, path, pool) {
     let emailError = "";
     if (changedFields.length) {
       try {
-        emailSent = await notifyInstructorUpdate(updatedInstructor, changedFields, req);
+        emailSent = await notifyInstructorUpdate(updatedInstructor, changedFields, req, newPassword);
       } catch (error) {
         emailError = error?.message || "EmailJS error.";
         console.warn("EmailJS instructor update notice failed.", emailError);
