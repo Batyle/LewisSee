@@ -225,6 +225,11 @@ async function handleAdmin(req, res, path, pool) {
     );
     return respond(res, 200, { instructor: serializeInstructor(updatedRows[0]), message: "Instructor details updated." });
   }
+  if (decision === "delete" && req.method === "DELETE") {
+    const [result] = await pool.execute("DELETE FROM instructors WHERE uid = ?", [uid]);
+    if (!result.affectedRows) return respond(res, 404, { message: "Instructor was not found." });
+    return respond(res, 200, { message: "Instructor account deleted." });
+  }
   if (req.method !== "POST") return respond(res, 404, { message: "Route not found." });
 
   const [matches] = await pool.execute(

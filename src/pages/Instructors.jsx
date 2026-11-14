@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   approveInstructor,
+  deleteInstructor,
   listInstructors,
   rejectInstructor,
   suspendInstructor,
@@ -119,6 +120,13 @@ export default function Instructors() {
     } finally {
       setBusyUid("");
     }
+  };
+
+  const removeInstructor = (person) => {
+    const confirmed = window.confirm(
+      `Permanently delete ${person.name} (${person.email})? This cannot be undone and may remove linked records.`,
+    );
+    if (confirmed) void runAction(person.uid, () => deleteInstructor(person.uid));
   };
 
   const beginEdit = (person) => {
@@ -250,6 +258,14 @@ export default function Instructors() {
                   >
                     Reject
                   </button>
+                  <button
+                    type="button"
+                    className="admin-action-reject"
+                    disabled={Boolean(busyUid)}
+                    onClick={() => removeInstructor(person)}
+                  >
+                    Delete
+                  </button>
                 </div>
               </li>
             ))}
@@ -318,6 +334,14 @@ export default function Instructors() {
                       Reactivate
                     </button>
                   )}
+                  <button
+                    type="button"
+                    className="admin-action-reject"
+                    disabled={Boolean(busyUid)}
+                    onClick={() => removeInstructor(person)}
+                  >
+                    Delete
+                  </button>
                 </div>
               </li>
             ))}

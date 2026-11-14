@@ -51,6 +51,8 @@ export const rejectInstructor = (uid, reason = "") =>
   });
 export const suspendInstructor = (uid) =>
   request(`/instructors/${encodeURIComponent(uid)}/suspend`, { method: "POST" });
+export const deleteInstructor = (uid) =>
+  request(`/instructors/${encodeURIComponent(uid)}/delete`, { method: "DELETE" });
 export const updateInstructor = (uid, instructor) =>
   request(`/instructors/${encodeURIComponent(uid)}/update`, {
     method: "PUT",
