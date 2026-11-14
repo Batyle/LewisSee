@@ -106,7 +106,9 @@ const verifyLiveness = async (canvas) => {
   const livenessUrl = import.meta.env.VITE_LIVENESS_API_URL?.trim() ||
     (import.meta.env.DEV ? "http://127.0.0.1:8000/liveness" : "");
   if (!livenessUrl)
-    throw new Error("Liveness is not configured for this deployment.");
+    throw new Error(
+      "Liveness is not configured. Set VITE_LIVENESS_API_URL to the public Render /liveness URL in the deployment settings, then redeploy.",
+    );
   const image = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
   if (!image) throw new Error("Could not capture a frame for liveness verification.");
   const body = new FormData();

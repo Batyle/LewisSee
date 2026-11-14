@@ -16,9 +16,7 @@ const request = async (path, options = {}) => {
       },
     });
   } catch {
-    throw new Error(
-      "Failed to reach the MySQL admin API. Start liveness-server (port 8000) and configure VITE_ADMIN_API_URL or VITE_LIVENESS_API_URL.",
-    );
+    throw new Error("Could not reach the admin API. Check the deployment and its API service configuration.");
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.message || body.detail || "Unable to complete the request.");

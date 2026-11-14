@@ -1,12 +1,24 @@
-const endpoint = () =>
-  import.meta.env.VITE_ATTENDANCE_API_URL?.trim() ||
-  (import.meta.env.DEV ? "http://127.0.0.1:8000/attendance" : "");
+const endpoint = () => {
+  const attendanceUrl = import.meta.env.VITE_ATTENDANCE_API_URL?.trim();
+  if (attendanceUrl) return attendanceUrl;
+
+  const livenessUrl = import.meta.env.VITE_LIVENESS_API_URL?.trim();
+  if (livenessUrl) {
+    return `${livenessUrl.replace(/\/liveness\/?$/, "").replace(/\/$/, "")}/attendance`;
+  }
+
+  return import.meta.env.DEV ? "http://127.0.0.1:8000/attendance" : "";
+};
 
 const REQUEST_TIMEOUT_MS = 20000;
 
 const request = async (method, body) => {
   const url = endpoint();
-  if (!url) throw new Error("Attendance API is not configured for this deployment.");
+  if (!url) {
+    throw new Error(
+      "Attendance API is not configured. Set VITE_LIVENESS_API_URL to the public Render /liveness URL in the deployment settings, then redeploy.",
+    );
+  }
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   let response;

@@ -57,7 +57,7 @@ async function signInInstructor(email, password) {
       body: JSON.stringify({ email, password }),
     });
   } catch {
-    throw new Error("Failed to reach the instructor API. Start liveness-server (port 8000) and configure VITE_ADMIN_API_URL or VITE_LIVENESS_API_URL.");
+    throw new Error("Could not reach the instructor API. Check the deployment and its API service configuration.");
   }
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -157,7 +157,7 @@ export default function InstructorAccess() {
             }),
           });
         } catch {
-          throw new Error("Failed to reach the instructor API. Start liveness-server (port 8000) and configure VITE_ADMIN_API_URL or VITE_LIVENESS_API_URL.");
+          throw new Error("Could not reach the instructor API. Check the deployment and its API service configuration.");
         }
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(apiErrorMessage(data, "Unable to submit your request."));
