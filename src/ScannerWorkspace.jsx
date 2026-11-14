@@ -397,9 +397,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         y = b.y * sy,
         w = b.width * sx,
         h = b.height * sy,
-        label = found
-          ? `${found.student.name} · ${found.score}%`
-          : "Unknown face";
+        label = found ? found.student.name : "Unknown face";
       ctx.strokeStyle = isSpoof
         ? colors.getPropertyValue("--danger")
         : found && livenessState === "live"
