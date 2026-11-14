@@ -1195,9 +1195,17 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             )}
             {match && (
               <div className="capture-overlay">
-                <b>{match.student.name}</b>
-                <small>Student ID: {match.student.studentId}</small>
-                <span>Recognized</span>
+                {match.student.photo && (
+                  <img
+                    src={match.student.photo}
+                    alt={`${match.student.name} enrolled portrait`}
+                  />
+                )}
+                <div>
+                  <b>{match.student.name}</b>
+                  <small>Student ID: {match.student.studentId}</small>
+                  <span>Recognized</span>
+                </div>
               </div>
             )}
           </div>

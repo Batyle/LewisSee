@@ -169,7 +169,9 @@ h1, h2, p { margin-top: 0; color: var(--text); }
 .loading-bar { width: min(220px, 75vw); height: 7px; overflow: hidden; margin: 9px; border-radius: 10px; background: var(--line); }
 .loading-bar i { display: block; width: 40%; height: 100%; border-radius: inherit; background: var(--accent); animation: load 1.2s ease-in-out infinite; }
 .error { max-width: 360px; color: var(--danger); line-height: 1.5; }
-.capture-overlay { position: absolute; right: 14px; bottom: 14px; display: grid; gap: 2px; padding: 10px 13px; border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: none; border: 1px solid var(--line); }
+.capture-overlay { position: absolute; right: 14px; bottom: 14px; display: flex; align-items: center; gap: 10px; padding: 8px 11px; border-radius: 8px; background: var(--surface); color: var(--text); box-shadow: none; border: 1px solid var(--line); }
+.capture-overlay img { width: 44px; height: 44px; border-radius: 6px; object-fit: cover; }
+.capture-overlay div { display: grid; gap: 2px; }
 .capture-overlay small { color: var(--muted); font-size: 0.7rem; }
 .capture-overlay span { font-size: 0.7rem; color: var(--good); font-weight: 800; }
 .scan-status { min-height: 2.6em; margin: 11px 0 5px; }
