@@ -64,7 +64,7 @@ cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "LIVENESS_CORS_ORIGINS",
-        "https://lewissee.vercel.app,https://lewissee.onrender.com,https://liveliness-server.vercel.app",
+        "https://lewis-see.vercel.app,https://lewissee.vercel.app,https://lewissee.onrender.com,https://liveliness-server.vercel.app",
     ).split(",")
     if origin.strip()
 ]
