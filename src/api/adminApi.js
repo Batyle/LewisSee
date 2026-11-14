@@ -16,7 +16,9 @@ const request = async (path, options = {}) => {
       },
     });
   } catch {
-    throw new Error("Could not reach the admin API. Check the deployment and its API service configuration.");
+    throw new Error(
+      "Could not reach the admin API. Confirm the Vercel deployment and that DB_* plus ADMIN_JWT_SECRET are set.",
+    );
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.message || body.detail || "Unable to complete the request.");

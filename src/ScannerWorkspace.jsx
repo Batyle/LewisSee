@@ -100,15 +100,13 @@ const toDataUrl = (file) =>
     reader.onerror = reject;
     reader.readAsDataURL(file);
   });
+const LIVE_LIVENESS_API_URL = "https://liveliness-server.vercel.app/liveness";
+const isLocalUrl = (url) =>
+  /^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$)/i.test(String(url || "").trim());
+
 const verifyLiveness = async (canvas) => {
-  // Loopback only works during local development. Production builds must be
-  // given a public HTTPS endpoint through VITE_LIVENESS_API_URL.
-  const livenessUrl = import.meta.env.VITE_LIVENESS_API_URL?.trim() ||
-    (import.meta.env.DEV ? "http://127.0.0.1:8000/liveness" : "");
-  if (!livenessUrl)
-    throw new Error(
-      "Liveness is not configured. Set VITE_LIVENESS_API_URL to the public Render /liveness URL in the deployment settings, then redeploy.",
-    );
+  const configured = import.meta.env.VITE_LIVENESS_API_URL?.trim() || "";
+  const livenessUrl = configured && !isLocalUrl(configured) ? configured : LIVE_LIVENESS_API_URL;
   const image = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.9));
   if (!image) throw new Error("Could not capture a frame for liveness verification.");
   const body = new FormData();

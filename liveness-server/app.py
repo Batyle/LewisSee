@@ -64,11 +64,14 @@ cors_origins = [
     origin.strip()
     for origin in os.getenv(
         "LIVENESS_CORS_ORIGINS",
-        "http://localhost:5173,http://127.0.0.1:5173,http://localhost:4173,http://127.0.0.1:4173",
+        "https://lewissee.vercel.app,https://lewissee.onrender.com,https://liveliness-server.vercel.app",
     ).split(",")
     if origin.strip()
 ]
-cors_origin_regex = os.getenv("LIVENESS_CORS_ORIGIN_REGEX", "").strip() or None
+cors_origin_regex = os.getenv(
+    "LIVENESS_CORS_ORIGIN_REGEX",
+    r"https://.*\.vercel\.app",
+).strip() or None
 app.add_middleware(
     CORSMiddleware,
     allow_origins=cors_origins,
@@ -637,6 +640,7 @@ def approve_instructor(uid: str, _admin: dict[str, str] = Depends(current_admin)
 
 
 @app.put("/admin/instructors/{uid}")
+@app.put("/admin/instructors/{uid}/update")
 def update_instructor(
     uid: str,
     payload: InstructorUpdate,
