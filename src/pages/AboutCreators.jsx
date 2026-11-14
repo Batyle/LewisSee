@@ -9,17 +9,17 @@ import "./AboutCreators.css";
 const creators = [
   {
     name: "Austin Dominic Valladolid",
-    role: "Frontend/Backend Integration",
+    role: "Data Analysis and Database Integration",
     image: austinPhoto,
     description:
-      "Connects the React experience with backend services and helps bring the system's attendance workflows together.",
+      "Works with attendance data and the MySQL database to support reliable data storage and retrieval.",
   },
   {
     name: "Luige Dela Torre",
-    role: "Data Analysis and Database Integration",
+    role: "Frontend/Backend Integration",
     image: luigePhoto,
     description:
-      "Works with attendance data and MySQL integration to support dependable record storage and retrieval.",
+      "Connects the React frontend with backend services and helps bring the system's attendance workflows together.",
   },
   {
     name: "Je An Fombuena",
