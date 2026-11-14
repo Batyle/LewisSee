@@ -12,7 +12,7 @@ Each check-in is saved with its Philippine Standard Time and can be classified a
 
 - **Facial attendance:** Recognizes enrolled students in the classroom workspace and records a check-in once per student, class, and date.
 - **Liveness detection:** A Python service checks the camera frame for signs of a live face before a scan is recorded. This helps deter still-photo attempts but is not a guarantee against every spoofing method.
-- **Time-based attendance policies:** Instructors can create and edit start/end ranges for on-time check-in, an optional late period, and time-out. Scans during the time-in range are Present, scans during the late range are Late, and scans outside both are Absent. Status boundaries use Philippine Standard Time.
+- **Time-based attendance policies:** Instructors can create start/end ranges for on-time check-in, an optional late period, and optional time-out. Live check-ins are accepted only during the saved Present or Late windows and only on the session date; scans before or after those windows do not create records or send emails. A verified scan during the configured time-out window records the student's check-out without sending another email. Status boundaries use Philippine Standard Time.
 - **Attendance history:** Search, sort, review, correct, and remove saved attendance records.
 - **Student enrollment:** Instructors can enroll students with a reference photo and class assignment.
 - **Instructor and administrator workspaces:** Instructors manage classroom attendance; administrators review instructor access requests and manage instructor accounts.
@@ -49,7 +49,7 @@ The interface responds to user and browser events to keep attendance workflows i
 - **Camera and lighting:** Face recognition works best with a usable camera, adequate lighting, and a clear view of the student's face.
 - **Liveness limitations:** Anti-spoofing reduces the risk of a still-image check-in but cannot guarantee detection of every advanced replay or deepfake.
 - **Biometric privacy:** Student reference photos and face descriptors are sensitive data. Limit access to authorized staff and protect the database and API credentials.
-- **Attendance email photos and status:** Live scans require a valid time policy for the selected class and date; without one, no live attendance record or email is created. The student EmailJS template must have a **Variable Attachment** with parameter name `attendance_photo`, filename `attendance.jpg`, and content type `image/jpeg`. To show a colored status badge, include this HTML in the template:
+- **Attendance email photos and status:** Live scans require a valid time policy for today's selected class session; without one, or outside its check-in window, no live attendance record or email is created. Students who never check in are not automatically marked absent or emailed. The student EmailJS template must have a **Variable Attachment** with parameter name `attendance_photo`, filename `attendance.jpg`, and content type `image/jpeg`. To show a colored status badge, include this HTML in the template:
 
   ```html
   <span style="display:inline-block;padding:10px 18px;border-radius:20px;color:{{status_color}};background:{{status_background}};font-weight:bold;">

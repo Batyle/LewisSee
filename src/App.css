@@ -255,7 +255,12 @@ h1, h2, p { margin-top: 0; color: var(--text); }
 
 /* --- UTILITIES & ANIMATIONS --- */
 .offline-banner { position: sticky; top: 8px; z-index: 10; margin-bottom: 12px; padding: 10px 14px; border-radius: 8px; background: var(--warning); color: #1a1408; font-weight: 800; }
-.notification { position: fixed; right: 18px; bottom: 18px; max-width: 300px; padding: 12px 15px; border-radius: 8px; background: var(--surface); box-shadow: none; color: var(--text); border: 1px solid var(--line); }
+.notification-stack { position: fixed; right: 18px; bottom: 18px; z-index: 60; display: grid; gap: 8px; width: min(360px, calc(100vw - 36px)); pointer-events: none; }
+.notification { display: flex; align-items: flex-start; gap: 12px; padding: 12px 12px 12px 15px; border-radius: 8px; background: var(--surface); box-shadow: none; color: var(--text); border: 1px solid var(--line); pointer-events: auto; }
+.notification > span { flex: 1; }
+.notification-close { flex: none; padding: 0 2px; border: 0; background: transparent; color: var(--muted); font-size: 1.1rem; line-height: 1; }
+.notification-close:hover { color: var(--text); }
+.history-notice { margin-top: 0; }
 
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes load { 50% { transform: translateX(160%); } }

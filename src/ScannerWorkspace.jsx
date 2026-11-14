@@ -21,6 +21,7 @@ import {
   determineAttendanceStatus,
   formatClock12Hour,
   isAttendancePolicyReady,
+  liveAttendancePhaseAt,
   nowManilaTime,
   sessionTimeRanges,
   todayManila,
@@ -212,6 +213,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     lastSignature = useRef(""),
     socket = useRef(),
     emailedRecords = useRef(new Set()),
+    attendanceActions = useRef(new Set()),
     selectedClass = useRef({ course: "BSIT", yearLevel: "3", block: "A" });
   const lastCloudValue = useRef("");
   const mounted = useRef(true),
@@ -477,70 +479,102 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     );
   }, []);
   const present = useCallback(
-    (student, attendancePhoto) => {
-      if (!isAttendancePolicyReady(activeSession)) return;
-      setRecords((all) => {
-        if (
-          all.some(
-            (r) =>
-              r.studentId === student.studentId &&
-              r.date === date &&
-              r.section === section,
-          )
-        )
-          return all;
-        const scanTime = nowManilaTime();
-        const ranges = sessionTimeRanges(activeSession);
-        const status = determineAttendanceStatus(
-          scanTime,
-          ranges.timeInStart,
-          ranges.timeInEnd,
-          ranges.lateStart,
-          ranges.lateEnd,
+    (student, frame) => {
+      if (!isAttendancePolicyReady(activeSession) || date !== todayManila()) return;
+      const scanTime = nowManilaTime();
+      const phase = liveAttendancePhaseAt(scanTime, activeSession);
+      if (!phase) return;
+      const attendanceKey = `${date}|${section}|${student.studentId}`;
+      const existingRecord = records.find(
+        (record) =>
+          record.studentId === student.studentId &&
+          record.date === date &&
+          record.section === section,
+      );
+      if (phase === "TimeOut") {
+        const actionKey = `out|${attendanceKey}`;
+        if (!existingRecord || existingRecord.timeOut || attendanceActions.current.has(actionKey))
+          return;
+        attendanceActions.current.add(actionKey);
+        const record = { ...existingRecord, timeOut: scanTime };
+        setRecords((all) =>
+          all.map((item) => item.id === record.id ? record : item),
         );
-        const record = {
-          id: crypto.randomUUID(),
-          studentId: student.studentId,
-          name: student.name,
-          date,
-          section,
-          time: scanTime,
-          status,
-          timeOut: null,
-        };
         socket.current?.send({ type: "attendance", id: record.id, record });
-        if (!emailedRecords.current.has(record.id)) {
-          emailedRecords.current.add(record.id);
-          void sendAttendanceEmail(student, record, attendancePhoto)
-            .then((sent) => {
-              if (sent)
-                setNotifications((items) =>
-                  [
-                    {
-                      id: `email-${record.id}`,
-                      message: `Attendance email sent to ${student.name}.`,
-                    },
-                    ...items,
-                  ].slice(0, 4),
-                );
-            })
-            .catch((error) =>
+        return;
+      }
+
+      const actionKey = `in|${attendanceKey}`;
+      if (existingRecord || attendanceActions.current.has(actionKey)) return;
+      attendanceActions.current.add(actionKey);
+      const record = {
+        id: crypto.randomUUID(),
+        studentId: student.studentId,
+        name: student.name,
+        date,
+        section,
+        time: scanTime,
+        status: phase,
+        timeOut: null,
+      };
+      setRecords((all) =>
+        all.some(
+          (item) =>
+            item.studentId === student.studentId &&
+            item.date === date &&
+            item.section === section,
+        )
+          ? all
+          : [...all, record],
+      );
+      socket.current?.send({ type: "attendance", id: record.id, record });
+      if (!emailedRecords.current.has(record.id)) {
+        emailedRecords.current.add(record.id);
+        const attendancePhoto = frame.toDataURL("image/jpeg", 0.65);
+        void sendAttendanceEmail(student, record, attendancePhoto)
+          .then((sent) => {
+            if (sent) {
+              const notificationId = `email-${record.id}`;
               setNotifications((items) =>
                 [
                   {
-                    id: `email-error-${record.id}`,
-                    message: `Attendance saved for ${student.name}. ${emailErrorMessage(error)}`,
+                    id: notificationId,
+                    message: `Attendance email sent to ${student.name}.`,
                   },
                   ...items,
                 ].slice(0, 4),
-              ),
+              );
+              setTimeout(
+                () => setNotifications((items) => items.filter((item) => item.id !== notificationId)),
+                3000,
+              );
+            }
+          })
+          .catch((error) => {
+            const notificationId = `email-error-${record.id}`;
+            setNotifications((items) =>
+              [
+                {
+                  id: notificationId,
+                  message: `Attendance saved for ${student.name}. ${emailErrorMessage(error)}`,
+                },
+                ...items,
+              ].slice(0, 4),
             );
-        }
-        return [...all, record];
-      });
+            setTimeout(
+              () => setNotifications((items) => items.filter((item) => item.id !== notificationId)),
+              3000,
+            );
+          });
+      }
     },
-    [activeSession, date, section],
+    [activeSession, date, records, section],
   );
+  const clearAttendanceActions = (record) => {
+    const key = `${record.date}|${record.section}|${record.studentId}`;
+    attendanceActions.current.delete(`in|${key}`);
+    attendanceActions.current.delete(`out|${key}`);
+  };
   const loop = useCallback(
     async (now) => {
       if (!running.current) return;
@@ -579,14 +613,39 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         const found = matches.find(Boolean);
         let liveness;
         let livenessFailed = false;
+        const selectedDateIsToday = date === todayManila();
+        const attendancePhase =
+          attendancePolicyReady && selectedDateIsToday
+            ? liveAttendancePhaseAt(nowManilaTime(), activeSession)
+            : null;
         const policyUnavailable = Boolean(found) && !attendancePolicyReady;
+        const dateUnavailable = Boolean(found) && attendancePolicyReady && !selectedDateIsToday;
+        const existingAttendance = found && records.find(
+          (record) =>
+            record.studentId === found.student.studentId &&
+            record.date === date &&
+            record.section === section,
+        );
+        const timeOutUnavailable =
+          Boolean(found) &&
+          attendancePhase === "TimeOut" &&
+          (!existingAttendance || existingAttendance.timeOut);
+        const attendanceWindowClosed =
+          Boolean(found) &&
+          attendancePolicyReady &&
+          selectedDateIsToday &&
+          !attendancePhase;
         if (found) {
-          if (!policyUnavailable) {
+          if (
+            !policyUnavailable &&
+            !dateUnavailable &&
+            !attendanceWindowClosed &&
+            !timeOutUnavailable
+          ) {
             try {
               liveness = await verifyLiveness(frame.current);
               if (liveness.live) {
-                const attendancePhoto = frame.current.toDataURL("image/jpeg", 0.65);
-                present(found.student, attendancePhoto);
+                present(found.student, frame.current);
               }
             } catch (livenessError) {
               console.warn("Liveness verification failed", livenessError);
@@ -608,8 +667,18 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           name: liveness?.live ? found?.student.name : undefined,
           message: policyUnavailable
             ? "Attendance time rules are not set for this class and date. No attendance record or email was created."
+            : dateUnavailable
+              ? "Live attendance is available only on the session date. No attendance record or email was created."
+              : attendanceWindowClosed
+                ? "The attendance check-in window is not open or has ended. No attendance record or email was created."
+                : timeOutUnavailable
+                  ? existingAttendance?.timeOut
+                    ? `${found.student.name} has already checked out.`
+                    : "No check-in record was found for this time-out window."
             : found && liveness?.live
-              ? `${found.student.name} recognized and verified live.`
+              ? attendancePhase === "TimeOut"
+                ? `${found.student.name} verified; check-out recorded.`
+                : `${found.student.name} recognized and verified live.`
               : found && liveness && !liveness.live
                 ? "Photo or screen detected — attendance was not recorded."
                 : found && livenessFailed
@@ -633,7 +702,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         busy.current = false;
       }
     },
-    [attendancePolicyReady, debugMode, paint, present, ui],
+    [activeSession, attendancePolicyReady, date, debugMode, paint, present, records, section, ui],
   );
   const start = useCallback(async () => {
     if (startingCamera.current) return;
@@ -898,6 +967,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             : student,
         ),
       );
+      records
+        .filter((record) => record.studentId === editingId)
+        .forEach(clearAttendanceActions);
       setRecords((all) =>
         all.map((record) => record.studentId === editingId
           ? { ...record, studentId: nextId, name: nextName }
@@ -917,6 +989,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   const deleteStudent = (student) => {
     if (!window.confirm(`Delete ${student.name} and their attendance records? This cannot be undone.`)) return;
     setStudents((all) => all.filter((item) => item.studentId !== student.studentId));
+    records
+      .filter((record) => record.studentId === student.studentId)
+      .forEach(clearAttendanceActions);
     setRecords((all) => all.filter((record) => record.studentId !== student.studentId));
     setNotice(`${student.name} was deleted.`);
   };
@@ -984,6 +1059,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     if (records.some((item) => item.studentId === next.studentId && item.date === next.date && item.section === next.section && item.id !== historyEditingId))
       return setNotice("This student already has attendance for that class and date.");
     if (historyEditingId) {
+      const previous = records.find((item) => item.id === historyEditingId);
+      if (previous) clearAttendanceActions(previous);
+      clearAttendanceActions(next);
       setRecords((all) => all.map((item) => item.id === historyEditingId ? { ...item, ...next } : item));
       setNotice("Attendance record updated.");
     } else {
@@ -1006,12 +1084,14 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   };
   const deleteHistoryRecord = (record) => {
     if (!window.confirm(`Delete the attendance record for ${record.name}?`)) return;
+    clearAttendanceActions(record);
     setRecords((all) => all.filter((item) => item.id !== record.id));
     setNotice("Attendance record deleted.");
   };
   const deleteAllHistory = () => {
     if (!records.length) return;
     if (!window.confirm(`Delete all ${records.length} attendance record(s)? This cannot be undone.`)) return;
+    attendanceActions.current.clear();
     setRecords([]);
     setHistoryEditingId(null);
     setNotice("All attendance records were deleted. Student and class data were kept.");
@@ -1548,6 +1628,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             <p className="muted">Add, correct, or remove saved attendance records.</p>
           </div>
         </div>
+        {notice && <p className="workspace-notice history-notice">{notice}</p>}
         <div className="history-layout">
           <form className="management-card history-form" onSubmit={saveHistoryRecord}>
             <div className="section-title"><div><p className="eyebrow">{historyEditingId ? "EDIT RECORD" : "NEW RECORD"}</p><h2>{historyEditingId ? "Update attendance" : "Add attendance"}</h2></div></div>
@@ -1558,8 +1639,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
               </select>
             </label>
             <label>Date<input type="date" value={historyDraft.date} onChange={(event) => setHistoryDraft({ ...historyDraft, date: event.target.value })} required /></label>
-            <label>Time-in<input type="time" value={historyDraft.time} onChange={(event) => setHistoryDraft({ ...historyDraft, time: event.target.value })} required /></label>
-            <label>Time-out<input type="time" value={historyDraft.timeOut || ""} onChange={(event) => setHistoryDraft({ ...historyDraft, timeOut: event.target.value })} /></label>
+            <label>Time-in<input type="time" step="1" value={historyDraft.time} onChange={(event) => setHistoryDraft({ ...historyDraft, time: event.target.value })} required /></label>
+            <label>Time-out<input type="time" step="1" value={historyDraft.timeOut || ""} onChange={(event) => setHistoryDraft({ ...historyDraft, timeOut: event.target.value })} /></label>
             <label>Class / section
               <select value={historyDraft.section} onChange={(event) => setHistoryDraft({ ...historyDraft, section: event.target.value })} required>
                 <option value="">Select class</option>
@@ -1606,12 +1687,24 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           </section>
         </div>
       </section>}
-      {notice && page !== "students" && <p className="workspace-notice">{notice}</p>}
-      {notifications.map((item) => (
-        <aside className="notification" key={item.id}>
-          {item.message || "New server notification"}
-        </aside>
-      ))}
+      {notice && page !== "students" && page !== "history" && <p className="workspace-notice">{notice}</p>}
+      {!!notifications.length && (
+        <div className="notification-stack" aria-live="polite">
+          {notifications.map((item) => (
+            <aside className="notification" key={item.id}>
+              <span>{item.message || "New server notification"}</span>
+              <button
+                type="button"
+                className="notification-close"
+                aria-label="Dismiss notification"
+                onClick={() => setNotifications((items) => items.filter((notification) => notification.id !== item.id))}
+              >
+                ×
+              </button>
+            </aside>
+          ))}
+        </div>
+      )}
     </main>
   );
 }

@@ -9,12 +9,13 @@ export const todayManila = () =>
     day: "2-digit",
   }).format(new Date());
 
-/** Current clock time as HH:MM in Philippine Standard Time. */
+/** Current clock time as HH:MM:SS in Philippine Standard Time. */
 export const nowManilaTime = () =>
   new Intl.DateTimeFormat("en-GB", {
     timeZone: MANILA_TZ,
     hour: "2-digit",
     minute: "2-digit",
+    second: "2-digit",
     hour12: false,
   }).format(new Date());
 
@@ -22,19 +23,21 @@ export const nowManilaTime = () =>
 export const parseClockToMinutes = (value) => {
   if (value == null || value === "") return null;
   const text = String(value).trim();
-  const match24 = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(text);
+  const match24 = /^(\d{1,2}):(\d{2})(?::(\d{2}))?$/.exec(text);
   if (match24) {
     const hours = Number(match24[1]);
     const minutes = Number(match24[2]);
-    if (hours > 23 || minutes > 59) return null;
+    const seconds = Number(match24[3] || 0);
+    if (hours > 23 || minutes > 59 || seconds > 59) return null;
     return hours * 60 + minutes;
   }
-  const match12 = /^(\d{1,2}):(\d{2})(?::\d{2})?\s*(AM|PM)$/i.exec(text);
+  const match12 = /^(\d{1,2}):(\d{2})(?::(\d{2}))?\s*(AM|PM)$/i.exec(text);
   if (!match12) return null;
   let hours = Number(match12[1]);
   const minutes = Number(match12[2]);
-  const meridiem = match12[3].toUpperCase();
-  if (hours < 1 || hours > 12 || minutes > 59) return null;
+  const seconds = Number(match12[3] || 0);
+  const meridiem = match12[4].toUpperCase();
+  if (hours < 1 || hours > 12 || minutes > 59 || seconds > 59) return null;
   if (meridiem === "AM") hours = hours === 12 ? 0 : hours;
   else hours = hours === 12 ? 12 : hours + 12;
   return hours * 60 + minutes;
@@ -47,7 +50,8 @@ export const formatClock12Hour = (value) => {
   const hour24 = Math.floor(minutes / 60);
   const hour12 = hour24 % 12 || 12;
   const minute = String(minutes % 60).padStart(2, "0");
-  return `${hour12}:${minute} ${hour24 < 12 ? "AM" : "PM"}`;
+  const seconds = /^(\d{1,2}):\d{2}:(\d{2})/.exec(String(value).trim())?.[2];
+  return `${hour12}:${minute}${seconds ? `:${seconds}` : ""} ${hour24 < 12 ? "AM" : "PM"}`;
 };
 
 const clockAtMinutes = (minutes) => {
@@ -76,22 +80,78 @@ export const sessionTimeRanges = (session) => {
       : session.lateThresholdMinutes == null
         ? "23:59"
         : clockAtMinutes(start + Math.max(0, Number(session.lateThresholdMinutes) || 0)));
-  return { timeInStart, timeInEnd, lateStart, lateEnd };
+  return {
+    timeInStart,
+    timeInEnd,
+    lateStart,
+    lateEnd,
+    timeOutStart: session.timeOutStart || null,
+    timeOutEnd: session.timeOutEnd || null,
+  };
 };
 
 export const isAttendancePolicyReady = (session) => {
   if (!session) return false;
 
-  const { timeInStart, timeInEnd, lateStart, lateEnd } = sessionTimeRanges(session);
+  const {
+    timeInStart,
+    timeInEnd,
+    lateStart,
+    lateEnd,
+    timeOutStart,
+    timeOutEnd,
+  } = sessionTimeRanges(session);
   const start = parseClockToMinutes(timeInStart);
   const end = parseClockToMinutes(timeInEnd);
   if (start == null || end == null || end <= start) return false;
-  if (!lateStart && !lateEnd) return true;
-  if (!lateStart || !lateEnd) return false;
+  let attendanceEnd = end;
+  if (lateStart || lateEnd) {
+    if (!lateStart || !lateEnd) return false;
+    const lateFrom = parseClockToMinutes(lateStart);
+    const lateUntil = parseClockToMinutes(lateEnd);
+    if (lateFrom == null || lateUntil == null || lateFrom <= end || lateUntil < lateFrom)
+      return false;
+    attendanceEnd = lateUntil;
+  }
 
-  const lateFrom = parseClockToMinutes(lateStart);
-  const lateUntil = parseClockToMinutes(lateEnd);
-  return lateFrom != null && lateUntil != null && lateFrom > end && lateUntil >= lateFrom;
+  if (!timeOutStart && !timeOutEnd) return true;
+  if (!timeOutStart || !timeOutEnd) return false;
+  const timeOutFrom = parseClockToMinutes(timeOutStart);
+  const timeOutUntil = parseClockToMinutes(timeOutEnd);
+  return (
+    timeOutFrom != null &&
+    timeOutUntil != null &&
+    timeOutFrom > attendanceEnd &&
+    timeOutUntil > timeOutFrom
+  );
+};
+
+export const liveAttendancePhaseAt = (currentTime, session) => {
+  if (!isAttendancePolicyReady(session)) return null;
+
+  const scan = parseClockToMinutes(currentTime);
+  const { timeInStart, timeInEnd, lateStart, lateEnd, timeOutStart, timeOutEnd } =
+    sessionTimeRanges(session);
+  const start = parseClockToMinutes(timeInStart);
+  const end = parseClockToMinutes(timeInEnd);
+  if (scan == null || start == null || end == null) return null;
+  if (scan >= start && scan <= end) return "Present";
+
+  if (lateStart && lateEnd) {
+    const lateFrom = parseClockToMinutes(lateStart);
+    const lateUntil = parseClockToMinutes(lateEnd);
+    if (lateFrom != null && lateUntil != null && scan >= lateFrom && scan <= lateUntil)
+      return "Late";
+  }
+
+  if (timeOutStart && timeOutEnd) {
+    const timeOutFrom = parseClockToMinutes(timeOutStart);
+    const timeOutUntil = parseClockToMinutes(timeOutEnd);
+    if (timeOutFrom != null && timeOutUntil != null && scan >= timeOutFrom && scan <= timeOutUntil)
+      return "TimeOut";
+  }
+
+  return null;
 };
 
 export const determineAttendanceStatus = (

@@ -83,9 +83,14 @@ export default function SessionPolicyForm({
     }
     if (
       hasTimeOutStart &&
-      (timeOutStart == null || timeOutEnd == null || timeOutEnd <= timeOutStart)
+      (
+        timeOutStart == null ||
+        timeOutEnd == null ||
+        timeOutEnd <= timeOutStart ||
+        timeOutStart <= (hasLateStart ? lateEnd : timeInEnd)
+      )
     ) {
-      setMessage("Time-out end must be after its start.");
+      setMessage("Time-out must be a valid range after the time-in and late periods.");
       return;
     }
 
@@ -116,8 +121,9 @@ export default function SessionPolicyForm({
       </p>
       <p className="muted session-policy-help">
         Live scans create records and send email only after these rules are saved.
-        Scans during Time-in are Present; scans during the optional Late period are Late.
-        Scans outside those periods are Absent.
+        Live check-ins are accepted only during the saved Time-in or Late windows.
+        Outside those periods the scanner will not save a record or send an email.
+        A verified scan during an optional Time-out window records a check-out only.
       </p>
       <div className="session-policy-grid">
         <fieldset className="session-policy-range">
