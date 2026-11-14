@@ -54,9 +54,28 @@ The interface responds to user and browser events to keep attendance workflows i
 
 LewisSee was developed by Group 7 for The Lewis College. The team members contributed in the following areas:
 
-- **Austin Dominic Valladolid — Frontend/Backend Integration:** Connected the React application with the Python services and database-backed workflows, helping the system components work together.
-- **Luige Dela Torre — Data Analysis and Database Integration:** Worked with attendance data and connected the application to its MySQL database for storing and retrieving records.
-- **Je An Fombuena — Frontend System Design and Documentation:** Contributed to the user interface design and prepared project documentation to explain the system and its use.
+<table>
+  <tr>
+    <td align="center" width="33%">
+      <img src="assets/creators/austin-dominic-valladolid.png" alt="Austin Dominic Valladolid" width="180" /><br />
+      <strong>Austin Dominic Valladolid</strong><br />
+      <em>Frontend/Backend Integration</em><br />
+      Integrates the React frontend with backend services and coordinates the system's application workflows.
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/creators/luige-dela-torre.png" alt="Luige Dela Torre" width="180" /><br />
+      <strong>Luige Dela Torre</strong><br />
+      <em>Data Analysis and Database Integration</em><br />
+      Works with attendance data and the MySQL database to support reliable data storage and retrieval.
+    </td>
+    <td align="center" width="33%">
+      <img src="assets/creators/je-an-fombuena.png" alt="Je An Fombuena" width="180" /><br />
+      <strong>Je An Fombuena</strong><br />
+      <em>Frontend System Design, UI, and Documentation</em><br />
+      Contributes to the interface and user experience, and documents the system and its workflows.
+    </td>
+  </tr>
+</table>
 
 ## 📚 References
 
