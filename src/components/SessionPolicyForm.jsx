@@ -1,15 +1,30 @@
 import { useEffect, useState } from "react";
+import { parseClockToMinutes, sessionTimeRanges } from "../attendancePolicy";
 
 const emptyDraft = {
-  requiredTimeIn: "08:00",
-  gracePeriodMinutes: "15",
-  lateThresholdMinutes: "30",
-  timeOut: "",
+  timeInStart: "08:00",
+  timeInEnd: "08:15",
+  lateStart: "08:16",
+  lateEnd: "08:30",
+  timeOutStart: "",
+  timeOutEnd: "",
+};
+
+const getDraft = (session) => {
+  if (!session) return emptyDraft;
+  const ranges = sessionTimeRanges(session);
+  return {
+    timeInStart: ranges.timeInStart || "08:00",
+    timeInEnd: ranges.timeInEnd || "08:15",
+    lateStart: ranges.lateStart || "",
+    lateEnd: ranges.lateEnd || "",
+    timeOutStart: session.timeOutStart || session.timeOut || "",
+    timeOutEnd: session.timeOutEnd || "",
+  };
 };
 
 /**
- * Instructor form for creating/editing time-based rules for one class session.
- * Props expect the current section + date and an optional existing session object.
+ * Instructor form for creating or editing time ranges for one class session.
  */
 export default function SessionPolicyForm({
   section,
@@ -22,16 +37,11 @@ export default function SessionPolicyForm({
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    setDraft({
-      requiredTimeIn: session?.requiredTimeIn || "08:00",
-      gracePeriodMinutes:
-        session?.gracePeriodMinutes == null ? "" : String(session.gracePeriodMinutes),
-      lateThresholdMinutes:
-        session?.lateThresholdMinutes == null ? "" : String(session.lateThresholdMinutes),
-      timeOut: session?.timeOut || "",
-    });
+    setDraft(getDraft(session));
     setMessage("");
   }, [session, section, date]);
+
+  const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
 
   const submit = (event) => {
     event.preventDefault();
@@ -39,34 +49,56 @@ export default function SessionPolicyForm({
       setMessage("Choose a class and date before saving the policy.");
       return;
     }
-    if (!draft.requiredTimeIn) {
-      setMessage("Required time-in is mandatory.");
+
+    const timeInStart = parseClockToMinutes(draft.timeInStart);
+    const timeInEnd = parseClockToMinutes(draft.timeInEnd);
+    if (timeInStart == null || timeInEnd == null || timeInEnd <= timeInStart) {
+      setMessage("Enter a valid time-in start and end. The end must be after the start.");
       return;
     }
-    const grace =
-      draft.gracePeriodMinutes === "" ? null : Number(draft.gracePeriodMinutes);
-    const late =
-      draft.lateThresholdMinutes === "" ? null : Number(draft.lateThresholdMinutes);
-    if (grace != null && (Number.isNaN(grace) || grace < 0)) {
-      setMessage("Grace period must be a non-negative number of minutes.");
+
+    const hasLateStart = Boolean(draft.lateStart);
+    const hasLateEnd = Boolean(draft.lateEnd);
+    const lateStart = parseClockToMinutes(draft.lateStart);
+    const lateEnd = parseClockToMinutes(draft.lateEnd);
+    if (hasLateStart !== hasLateEnd) {
+      setMessage("Enter both start and end times for the late period, or leave both empty.");
       return;
     }
-    if (late != null && (Number.isNaN(late) || late < 0)) {
-      setMessage("Late threshold must be a non-negative number of minutes.");
+    if (
+      hasLateStart &&
+      (lateStart == null || lateEnd == null || lateStart <= timeInEnd || lateEnd < lateStart)
+    ) {
+      setMessage("The late period must start after time-in ends and its end must be after its start.");
       return;
     }
-    if (grace != null && late != null && late < grace) {
-      setMessage("Late threshold must be greater than or equal to grace period.");
+
+    const hasTimeOutStart = Boolean(draft.timeOutStart);
+    const hasTimeOutEnd = Boolean(draft.timeOutEnd);
+    const timeOutStart = parseClockToMinutes(draft.timeOutStart);
+    const timeOutEnd = parseClockToMinutes(draft.timeOutEnd);
+    if (hasTimeOutStart !== hasTimeOutEnd) {
+      setMessage("Enter both start and end times for time-out, or leave both empty.");
       return;
     }
+    if (
+      hasTimeOutStart &&
+      (timeOutStart == null || timeOutEnd == null || timeOutEnd <= timeOutStart)
+    ) {
+      setMessage("Time-out end must be after its start.");
+      return;
+    }
+
     onSave({
       id: session?.id || crypto.randomUUID(),
       section,
       date,
-      requiredTimeIn: draft.requiredTimeIn,
-      gracePeriodMinutes: grace,
-      lateThresholdMinutes: late,
-      timeOut: draft.timeOut || null,
+      timeInStart: draft.timeInStart,
+      timeInEnd: draft.timeInEnd,
+      lateStart: hasLateStart ? draft.lateStart : null,
+      lateEnd: hasLateEnd ? draft.lateEnd : null,
+      timeOutStart: hasTimeOutStart ? draft.timeOutStart : null,
+      timeOutEnd: hasTimeOutEnd ? draft.timeOutEnd : null,
     });
     setMessage(session ? "Attendance policy updated." : "Attendance policy saved.");
   };
@@ -82,52 +114,76 @@ export default function SessionPolicyForm({
       <p className="muted session-policy-meta">
         {section || "No class"} · {date || "No date"} · Asia/Manila (PST)
       </p>
+      <p className="muted session-policy-help">
+        Scans during Time-in are Present; scans during the optional Late period are Late.
+        Scans outside those periods are Absent.
+      </p>
       <div className="session-policy-grid">
-        <label>
-          Required time-in
-          <input
-            type="time"
-            required
-            disabled={disabled}
-            value={draft.requiredTimeIn}
-            onChange={(event) => setDraft({ ...draft, requiredTimeIn: event.target.value })}
-          />
-        </label>
-        <label>
-          Grace period (minutes)
-          <input
-            type="number"
-            min="0"
-            max="240"
-            placeholder="Optional"
-            disabled={disabled}
-            value={draft.gracePeriodMinutes}
-            onChange={(event) => setDraft({ ...draft, gracePeriodMinutes: event.target.value })}
-          />
-        </label>
-        <label>
-          Late threshold (minutes)
-          <input
-            type="number"
-            min="0"
-            max="720"
-            placeholder="Optional"
-            disabled={disabled}
-            value={draft.lateThresholdMinutes}
-            onChange={(event) =>
-              setDraft({ ...draft, lateThresholdMinutes: event.target.value })
-            }
-          />
-        </label>
-        <label>
-          Time-out
-          <input
-            type="time"
-            disabled={disabled}
-            value={draft.timeOut}
-            onChange={(event) => setDraft({ ...draft, timeOut: event.target.value })}
-          />
-        </label>
+        <fieldset className="session-policy-range">
+          <legend>Time-in</legend>
+          <label>
+            Start
+            <input
+              type="time"
+              required
+              disabled={disabled}
+              value={draft.timeInStart}
+              onChange={(event) => update("timeInStart", event.target.value)}
+            />
+          </label>
+          <label>
+            End
+            <input
+              type="time"
+              required
+              disabled={disabled}
+              value={draft.timeInEnd}
+              onChange={(event) => update("timeInEnd", event.target.value)}
+            />
+          </label>
+        </fieldset>
+        <fieldset className="session-policy-range">
+          <legend>Late period (optional)</legend>
+          <label>
+            Start
+            <input
+              type="time"
+              disabled={disabled}
+              value={draft.lateStart}
+              onChange={(event) => update("lateStart", event.target.value)}
+            />
+          </label>
+          <label>
+            End
+            <input
+              type="time"
+              disabled={disabled}
+              value={draft.lateEnd}
+              onChange={(event) => update("lateEnd", event.target.value)}
+            />
+          </label>
+        </fieldset>
+        <fieldset className="session-policy-range">
+          <legend>Time-out (optional)</legend>
+          <label>
+            Start
+            <input
+              type="time"
+              disabled={disabled}
+              value={draft.timeOutStart}
+              onChange={(event) => update("timeOutStart", event.target.value)}
+            />
+          </label>
+          <label>
+            End
+            <input
+              type="time"
+              disabled={disabled}
+              value={draft.timeOutEnd}
+              onChange={(event) => update("timeOutEnd", event.target.value)}
+            />
+          </label>
+        </fieldset>
       </div>
       <div className="form-actions">
         <button type="submit" disabled={disabled}>

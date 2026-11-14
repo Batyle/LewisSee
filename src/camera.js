@@ -38,19 +38,34 @@ export function drawImageCover(context, source, width, height) {
 }
 
 export async function requestCamera() {
-  if (!navigator.mediaDevices?.getUserMedia) throw new Error("This browser does not support camera access.");
-  return navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user", width: { ideal: CAMERA_WIDTH }, height: { ideal: CAMERA_HEIGHT }, frameRate: { ideal: CAMERA_FPS, max: CAMERA_FPS } },
+  if (typeof window !== "undefined" && !window.isSecureContext) {
+    throw new Error("Camera access requires HTTPS. Open this site using a secure connection and retry.");
+  }
+  if (!navigator.mediaDevices?.getUserMedia) {
+    throw new Error("This browser does not support camera access.");
+  }
+  const constraints = {
+    video: { facingMode: { ideal: "user" }, width: { ideal: CAMERA_WIDTH }, height: { ideal: CAMERA_HEIGHT }, frameRate: { ideal: CAMERA_FPS, max: CAMERA_FPS } },
     audio: false,
-  });
+  };
+  try {
+    return await navigator.mediaDevices.getUserMedia(constraints);
+  } catch (error) {
+    if (error?.name !== "OverconstrainedError") throw error;
+    return navigator.mediaDevices.getUserMedia({ video: true, audio: false });
+  }
 }
 
 export function stopCamera(stream) { stream?.getTracks().forEach((track) => track.stop()); }
 export function setCameraPaused(stream, paused) { stream?.getVideoTracks().forEach((track) => { track.enabled = !paused; }); }
 
 export function cameraErrorMessage(error) {
-  if (error?.name === "NotAllowedError") return "Camera permission was denied. Allow access in your browser settings and retry.";
+  if (error?.name === "NotAllowedError") return "Camera access was denied or blocked. Allow camera access for this site in your browser settings, then retry.";
   if (error?.name === "NotFoundError") return "No camera was found. Connect a camera and retry.";
   if (error?.name === "NotReadableError") return "Your camera is in use by another app. Close that app and retry.";
-  return "The camera could not be started. Please retry.";
+  if (error?.name === "OverconstrainedError") return "The camera does not support the requested settings. Try another camera.";
+  if (error?.name === "SecurityError") return "Camera access is blocked by this page's security settings.";
+  if (error?.name === "AbortError") return "Camera start was interrupted. Click Start camera and try again.";
+  if (error?.name === "TypeError") return "Camera preview was not ready. Open the attendance desk and click Start camera.";
+  return error?.message || "The camera could not be started. Please retry.";
 }

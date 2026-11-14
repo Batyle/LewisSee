@@ -14,13 +14,13 @@ import {
   INFERENCE_HEIGHT,
   INFERENCE_WIDTH,
   loadDetector,
-  warmDetector,
 } from "./detector";
 import { NotificationConnection } from "./connection";
 import { loadAttendanceStore, saveAttendanceStore } from "./attendanceApi";
 import {
   determineAttendanceStatus,
   nowManilaTime,
+  sessionTimeRanges,
   todayManila,
 } from "./attendancePolicy";
 import { applyTheme, getTheme, watchSystemTheme } from "./theme";
@@ -86,11 +86,11 @@ const read = (key) => {
     return [];
   }
 };
-const timed = (promise, message) =>
+const timed = (promise, message, timeout = TIMEOUT) =>
   Promise.race([
     promise,
     new Promise((_, reject) =>
-      setTimeout(() => reject(new Error(message)), TIMEOUT),
+      setTimeout(() => reject(new Error(message)), timeout),
     ),
   ]);
 const toDataUrl = (file) =>
@@ -148,22 +148,29 @@ const emailErrorMessage = (error) => {
   return detail ? `Email could not be sent: ${detail}` : "Email could not be sent.";
 };
 
-const Loader = memo(({ stage, error, elapsed, retry }) => (
-  <div className="pipeline-status" role="status">
-    <div className="spinner" />
-    <p className="eyebrow">CAMERA PIPELINE</p>
+const Loader = memo(({ stage, error, elapsed, retry, requested, starting }) => (
+  <div className="pipeline-status" aria-live="polite">
+    {starting && <div className="spinner" />}
+    <p className="eyebrow">CAMERA SCANNER</p>
     <h2>{stage}</h2>
     {error ? (
       <>
         <p className="error">{error}</p>
-        <button onClick={retry}>Retry</button>
+        <button type="button" onClick={retry}>Retry camera</button>
       </>
-    ) : (
+    ) : starting ? (
       <>
         <div className="loading-bar">
           <i />
         </div>
         <small>{elapsed}s elapsed</small>
+      </>
+    ) : (
+      <>
+        <p>Allow camera access to start face recognition. Your browser will ask for permission.</p>
+        <button type="button" onClick={retry}>
+          {requested ? "Start camera" : "Allow camera & start scanner"}
+        </button>
       </>
     )}
   </div>
@@ -186,10 +193,15 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     emailedRecords = useRef(new Set()),
     selectedClass = useRef({ course: "BSIT", yearLevel: "3", block: "A" });
   const lastCloudValue = useRef("");
-  const [stage, setStage] = useState("Requesting camera permission"),
+  const mounted = useRef(true),
+    startingCamera = useRef(false);
+  const [stage, setStage] = useState("Camera is off"),
     [error, setError] = useState(""),
     [elapsed, setElapsed] = useState(0),
-    [ready, setReady] = useState(false);
+    [ready, setReady] = useState(false),
+    [cameraConnected, setCameraConnected] = useState(false),
+    [cameraRequested, setCameraRequested] = useState(false),
+    [cameraStarting, setCameraStarting] = useState(false);
   const [students, setStudents] = useState(() => read("attendance-students")),
     [records, setRecords] = useState(() => read("attendance-records")),
     [classes, setClasses] = useState(() => read("attendance-classes")),
@@ -313,9 +325,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     return watchSystemTheme(theme, () => applyTheme("system"));
   }, [theme]);
   useEffect(() => {
-    const tick = setInterval(() => !ready && setElapsed((n) => n + 1), 1000);
+    if (!cameraStarting) return undefined;
+    const tick = setInterval(() => setElapsed((n) => n + 1), 1000);
     return () => clearInterval(tick);
-  }, [ready]);
+  }, [cameraStarting]);
   useEffect(() => {
     const onlineHandler = () => {
         setOnline(true);
@@ -417,6 +430,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       }
       return [...all, nextSession];
     });
+    const ranges = sessionTimeRanges(nextSession);
     setRecords((all) =>
       all.map((record) => {
         if (record.section !== nextSession.section || record.date !== nextSession.date) return record;
@@ -424,9 +438,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           ...record,
           status: determineAttendanceStatus(
             record.time,
-            nextSession.requiredTimeIn,
-            nextSession.gracePeriodMinutes,
-            nextSession.lateThresholdMinutes,
+            ranges.timeInStart,
+            ranges.timeInEnd,
+            ranges.lateStart,
+            ranges.lateEnd,
           ),
         };
       }),
@@ -445,12 +460,14 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         )
           return all;
         const scanTime = nowManilaTime();
+        const ranges = activeSession ? sessionTimeRanges(activeSession) : null;
         const status = activeSession
           ? determineAttendanceStatus(
               scanTime,
-              activeSession.requiredTimeIn,
-              activeSession.gracePeriodMinutes,
-              activeSession.lateThresholdMinutes,
+              ranges.timeInStart,
+              ranges.timeInEnd,
+              ranges.lateStart,
+              ranges.lateEnd,
             )
           : "Present";
         const record = {
@@ -582,53 +599,116 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [debugMode, paint, present, ui],
   );
   const start = useCallback(async () => {
+    if (startingCamera.current) return;
+    startingCamera.current = true;
+    setCameraRequested(true);
+    setCameraStarting(true);
     stop();
     stopCamera(stream.current);
+    stream.current = null;
+    if (video.current) video.current.srcObject = null;
+    setCameraConnected(false);
     setReady(false);
     setError("");
     setElapsed(0);
+    setStage("Waiting for camera permission");
     try {
-      setStage("Requesting camera permission");
-      stream.current = await timed(
-        requestCamera(),
-        "Camera permission timed out. Check that a camera is connected.",
-      );
+      // The video element only exists after the attendance workspace mounts.
+      // Never start the camera from the full-page loading screen.
+      if (!video.current) {
+        throw new Error("Camera preview is not ready yet. Leave this screen and try Start camera again.");
+      }
+
+      stopCamera(stream.current);
+      stream.current = null;
+      video.current.srcObject = null;
+      setCameraConnected(false);
+
+      // Permission must come from this click so browsers allow getUserMedia.
+      const cameraStream = await requestCamera();
+      if (!mounted.current) {
+        stopCamera(cameraStream);
+        return;
+      }
+      if (!video.current) {
+        stopCamera(cameraStream);
+        throw new Error("Camera preview disappeared before the stream could attach. Retry the scanner.");
+      }
+
+      stream.current = cameraStream;
+      video.current.srcObject = cameraStream;
+      if (video.current.readyState < 2) {
+        await new Promise((resolve, reject) => {
+          const node = video.current;
+          const onReady = () => {
+            node.removeEventListener("loadeddata", onReady);
+            node.removeEventListener("error", onError);
+            resolve();
+          };
+          const onError = () => {
+            node.removeEventListener("loadeddata", onReady);
+            node.removeEventListener("error", onError);
+            reject(new Error("The camera stream could not be displayed."));
+          };
+          node.addEventListener("loadeddata", onReady, { once: true });
+          node.addEventListener("error", onError, { once: true });
+        });
+      }
+      await video.current.play();
+      if (!mounted.current) return;
+      setCameraConnected(true);
+
       setStage("Loading face model");
       await timed(
         loadDetector(),
-        "The face model could not download in 20 seconds. Check your internet connection.",
+        "Face models did not finish loading in 60 seconds. Check your internet connection and retry.",
+        60000,
       );
+      if (!mounted.current) return;
       frame.current = createInferenceCanvas(INFERENCE_WIDTH, INFERENCE_HEIGHT);
-      setStage("Warming up detector");
-      await timed(
-        warmDetector(frame.current),
-        "Detector warm-up timed out. Close other tabs and retry.",
-      );
-      video.current.srcObject = stream.current;
-      await video.current.play();
       setStage("Connected");
       setReady(true);
       running.current = true;
       raf.current = requestAnimationFrame(loop);
     } catch (cause) {
-      stopCamera(stream.current);
-      stream.current = null;
-      const message =
-        cause.message?.includes("timed") || cause.message?.includes("model")
-          ? cause.message
-          : cameraErrorMessage(cause);
+      if (!mounted.current) return;
+      const cameraIsConnected = stream.current?.active && video.current?.srcObject === stream.current;
+      const message = cameraIsConnected
+        ? `Camera is connected, but the face scanner could not load. ${cause?.message || "Check the network and retry."}`
+        : cameraErrorMessage(cause);
+      if (!cameraIsConnected) {
+        stopCamera(stream.current);
+        stream.current = null;
+        if (video.current) video.current.srcObject = null;
+        setCameraConnected(false);
+      }
+      setStage(cameraIsConnected ? "Face scanner could not load" : "Camera could not start");
       setError(message);
       showError(message);
+    } finally {
+      startingCamera.current = false;
+      if (mounted.current) setCameraStarting(false);
     }
   }, [loop, showError, stop]);
   useEffect(() => {
-    if (access !== "granted") return undefined;
-    start();
+    mounted.current = true;
     return () => {
+      mounted.current = false;
       stop();
       stopCamera(stream.current);
+      stream.current = null;
+      if (video.current) video.current.srcObject = null;
     };
-  }, [access, start, stop]);
+  }, [stop]);
+  // Preload face models after attendance data is ready so Start camera is faster.
+  useEffect(() => {
+    if (!cloudLoaded) return undefined;
+    let cancelled = false;
+    void loadDetector().catch((cause) => {
+      if (!cancelled) console.warn("Face model preload failed", cause);
+    });
+    return () => { cancelled = true; };
+  }, [cloudLoaded]);
   useEffect(() => {
     if (access !== "granted") return undefined;
     const change = () => {
@@ -833,6 +913,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     const policy = sessions.find(
       (item) => item.section === sectionValue && item.date === historyDraft.date,
     );
+    const policyRanges = policy ? sessionTimeRanges(policy) : null;
     const next = {
       studentId: historyDraft.studentId,
       name: student?.name || "",
@@ -843,9 +924,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       status: policy
         ? determineAttendanceStatus(
             historyDraft.time.trim(),
-            policy.requiredTimeIn,
-            policy.gracePeriodMinutes,
-            policy.lateThresholdMinutes,
+            policyRanges.timeInStart,
+            policyRanges.timeInEnd,
+            policyRanges.lateStart,
+            policyRanges.lateEnd,
           )
         : "Present",
     };
@@ -911,18 +993,13 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     () => students.filter((student) => belongsToClass(student, course, yearLevel, block)),
     [block, course, students, yearLevel],
   );
-  if (!startupDismissed && (!cloudLoaded || !ready)) {
-    const startupError = [accessError, error].filter(Boolean).join(" ");
+  if (!startupDismissed && !cloudLoaded) {
     return (
       <LoadingScreen
-        message={!cloudLoaded ? "Loading attendance records…" : stage}
-        steps={[
-          { label: "Attendance data", status: accessError ? "error" : cloudLoaded ? "ready" : "loading" },
-          { label: "Camera and face scanner", status: error ? "error" : ready ? "ready" : "loading" },
-        ]}
-        error={startupError}
-        onRetry={error ? start : undefined}
-        onContinue={startupError ? () => {
+        message="Loading attendance records…"
+        steps={[{ label: "Attendance data", status: accessError ? "error" : "loading" }]}
+        error={accessError}
+        onContinue={accessError ? () => {
           if (!cloudLoaded) setCloudLoaded(true);
           setStartupDismissed(true);
         } : undefined}
@@ -1028,7 +1105,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             Date
             <input
               type="date"
-              disabled={!ready}
+              disabled={!cloudLoaded}
               value={date}
               onChange={(e) => setDate(e.target.value)}
             />
@@ -1036,7 +1113,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           <label>
             Course
             <select
-              disabled={!ready}
+              disabled={!cloudLoaded}
               value={course}
               onChange={(e) => {
                 const next = activeClasses.find((item) => item.course === e.target.value);
@@ -1048,7 +1125,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           </label>
           <label>
             Year
-            <select disabled={!ready} value={yearLevel} onChange={(e) => {
+            <select disabled={!cloudLoaded} value={yearLevel} onChange={(e) => {
               const next = activeClasses.find((item) => item.course === course && String(item.yearLevel) === e.target.value);
               if (next) { setYearLevel(String(next.yearLevel)); setBlock(next.block); }
             }}>
@@ -1057,7 +1134,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           </label>
           <label>
             Block
-            <select disabled={!ready} value={block} onChange={(e) => setBlock(e.target.value)}>
+            <select disabled={!cloudLoaded} value={block} onChange={(e) => setBlock(e.target.value)}>
               {blocksForClass.map((item) => <option key={item}>{item}</option>)}
             </select>
           </label>
@@ -1078,10 +1155,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
               <h2>Recognition desk</h2>
             </div>
             <span className={`live-pill ${ready ? "on" : ""}`}>
-              {ready ? "LIVE" : "LOADING"}
+              {ready ? "LIVE" : cameraStarting ? "STARTING" : error ? "ERROR" : "OFF"}
             </span>
           </div>
-          <div className={`camera-wrap ${ready ? "visible" : ""}`}>
+          <div className={`camera-wrap ${cameraConnected || ready ? "visible previewing" : ""}`}>
             <video ref={video} muted playsInline />
             <canvas ref={overlay} style={{ transform: "none" }} />
             {!ready && (
@@ -1090,6 +1167,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                 error={error}
                 elapsed={elapsed}
                 retry={start}
+                requested={cameraRequested}
+                starting={cameraStarting}
               />
             )}
             {match && (

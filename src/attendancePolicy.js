@@ -40,32 +40,59 @@ export const parseClockToMinutes = (value) => {
   return hours * 60 + minutes;
 };
 
-/**
- * Present: at/before requiredTimeIn + grace
- * Late: after grace and at/before requiredTimeIn + lateThreshold
- * Absent: after lateThreshold (Late if lateThreshold is unset)
- */
+const clockAtMinutes = (minutes) => {
+  const normalized = ((minutes % 1440) + 1440) % 1440;
+  return `${String(Math.floor(normalized / 60)).padStart(2, "0")}:${String(normalized % 60).padStart(2, "0")}`;
+};
+
+export const sessionTimeRanges = (session) => {
+  const timeInStart = session.timeInStart || session.requiredTimeIn;
+  const start = parseClockToMinutes(timeInStart);
+  const isLegacy = !session.timeInEnd;
+  const timeInEnd =
+    session.timeInEnd ||
+    (start == null
+      ? ""
+      : clockAtMinutes(start + Math.max(0, Number(session.gracePeriodMinutes) || 0)));
+  const lateStart =
+    session.lateStart ||
+    (!isLegacy || parseClockToMinutes(timeInEnd) == null
+      ? null
+      : clockAtMinutes((parseClockToMinutes(timeInEnd) ?? start) + 1));
+  const lateEnd =
+    session.lateEnd ||
+    (!isLegacy || start == null
+      ? null
+      : session.lateThresholdMinutes == null
+        ? "23:59"
+        : clockAtMinutes(start + Math.max(0, Number(session.lateThresholdMinutes) || 0)));
+  return { timeInStart, timeInEnd, lateStart, lateEnd };
+};
+
 export const determineAttendanceStatus = (
   currentScanTime,
-  requiredTimeIn,
-  gracePeriodMinutes = null,
-  lateThresholdMinutes = null,
+  timeInStart,
+  timeInEnd,
+  lateStart = null,
+  lateEnd = null,
 ) => {
   const scan = parseClockToMinutes(currentScanTime);
-  const required = parseClockToMinutes(requiredTimeIn);
-  if (scan == null || required == null) {
-    throw new RangeError("Current scan time and required time-in must be valid.");
+  const start = parseClockToMinutes(timeInStart);
+  const end = parseClockToMinutes(timeInEnd);
+  if (scan == null || start == null || end == null || end <= start) {
+    throw new RangeError("Current scan time and time-in start/end must be valid.");
   }
 
-  const grace = Math.max(0, Number(gracePeriodMinutes) || 0);
-  const presentUntil = required + grace;
-  if (scan <= presentUntil) return "Present";
+  if (scan >= start && scan <= end) return "Present";
 
-  if (lateThresholdMinutes == null || lateThresholdMinutes === "") return "Late";
+  if (lateStart == null || lateStart === "" || lateEnd == null || lateEnd === "") return "Absent";
+  const lateFrom = parseClockToMinutes(lateStart);
+  const lateUntil = parseClockToMinutes(lateEnd);
+  if (lateFrom == null || lateUntil == null || lateFrom <= end || lateUntil < lateFrom) {
+    throw new RangeError("Late period start/end must form a valid range after time-in.");
+  }
 
-  const lateUntil = required + Math.max(0, Number(lateThresholdMinutes) || 0);
-  if (scan <= lateUntil) return "Late";
-  return "Absent";
+  return scan >= lateFrom && scan <= lateUntil ? "Late" : "Absent";
 };
 
 export const statusForRecord = (record, sessions = []) => {
@@ -73,10 +100,12 @@ export const statusForRecord = (record, sessions = []) => {
     (item) => item.section === record.section && item.date === record.date,
   );
   if (!session) return record.status || "Present";
+  const ranges = sessionTimeRanges(session);
   return determineAttendanceStatus(
     record.time,
-    session.requiredTimeIn,
-    session.gracePeriodMinutes,
-    session.lateThresholdMinutes,
+    ranges.timeInStart,
+    ranges.timeInEnd,
+    ranges.lateStart,
+    ranges.lateEnd,
   );
 };

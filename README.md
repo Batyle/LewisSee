@@ -6,13 +6,13 @@
 
 LewisSee is a web-based attendance platform for instructors and administrators at The Lewis College. Instead of relying on paper roll calls or sign-in sheets, instructors can enroll students, select a class and date, and record attendance after a student's enrolled face is recognized and the camera image passes a liveness check.
 
-Each check-in is saved with its Philippine Standard Time and can be classified as **Present**, **Late**, or **Absent** using the session's time-in, grace period, and late threshold. Attendance records and session rules are stored in MySQL so instructors and administrators can review and manage them across devices. When EmailJS is configured and a student has an email address on file, LewisSee can send that student a check-in notification.
+Each check-in is saved with its Philippine Standard Time and can be classified as **Present**, **Late**, or **Absent** using the session's time-in and optional late time ranges. Attendance records and session rules are stored in MySQL so instructors and administrators can review and manage them across devices. When EmailJS is configured and a student has an email address on file, LewisSee can send that student a check-in notification.
 
 ## ✨ Main Features
 
 - **Facial attendance:** Recognizes enrolled students in the classroom workspace and records a check-in once per student, class, and date.
 - **Liveness detection:** A Python service checks the camera frame for signs of a live face before a scan is recorded. This helps deter still-photo attempts but is not a guarantee against every spoofing method.
-- **Time-based attendance policies:** Instructors can create and edit session rules, including required time-in, optional grace period, late threshold, and time-out. Status boundaries use Philippine Standard Time.
+- **Time-based attendance policies:** Instructors can create and edit start/end ranges for on-time check-in, an optional late period, and time-out. Scans during the time-in range are Present, scans during the late range are Late, and scans outside both are Absent. Status boundaries use Philippine Standard Time.
 - **Attendance history:** Search, sort, review, correct, and remove saved attendance records.
 - **Student enrollment:** Instructors can enroll students with a reference photo and class assignment.
 - **Instructor and administrator workspaces:** Instructors manage classroom attendance; administrators review instructor access requests and manage instructor accounts.

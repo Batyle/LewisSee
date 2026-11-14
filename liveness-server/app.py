@@ -110,7 +110,13 @@ class AttendanceSession(BaseModel):
     id: str = Field(min_length=1, max_length=64)
     section: str = Field(min_length=1, max_length=191)
     date: str = Field(min_length=10, max_length=10)
-    requiredTimeIn: str = Field(min_length=4, max_length=8)
+    requiredTimeIn: str | None = Field(default=None, min_length=4, max_length=8)
+    timeInStart: str | None = Field(default=None, min_length=4, max_length=8)
+    timeInEnd: str | None = Field(default=None, min_length=4, max_length=8)
+    lateStart: str | None = Field(default=None, min_length=4, max_length=8)
+    lateEnd: str | None = Field(default=None, min_length=4, max_length=8)
+    timeOutStart: str | None = Field(default=None, min_length=4, max_length=8)
+    timeOutEnd: str | None = Field(default=None, min_length=4, max_length=8)
     gracePeriodMinutes: int | None = Field(default=None, ge=0, le=240)
     lateThresholdMinutes: int | None = Field(default=None, ge=0, le=720)
     timeOut: str | None = Field(default=None, max_length=8)
@@ -165,39 +171,55 @@ def now_manila() -> datetime:
     return datetime.now(MANILA_TZ)
 
 
+def add_minutes_to_clock(value: Any, minutes: int) -> str | None:
+    parsed = parse_clock_time(value)
+    if parsed is None:
+        return None
+    total = (parsed.hour * 60 + parsed.minute + minutes) % (24 * 60)
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def session_time_ranges(session: AttendanceSession) -> tuple[str | None, str | None, str | None, str | None]:
+    time_in_start = session.timeInStart or session.requiredTimeIn
+    if session.timeInEnd:
+        time_in_end = session.timeInEnd
+        late_start = session.lateStart
+        late_end = session.lateEnd
+    else:
+        time_in_end = add_minutes_to_clock(time_in_start, session.gracePeriodMinutes or 0)
+        late_start = add_minutes_to_clock(time_in_end, 1)
+        late_end = (
+            add_minutes_to_clock(time_in_start, session.lateThresholdMinutes)
+            if session.lateThresholdMinutes is not None
+            else "23:59" if late_start else None
+        )
+    return time_in_start, time_in_end, late_start, late_end
+
+
 def determine_attendance_status(
     current_scan_time: Any,
-    required_time_in: Any,
-    grace_period_minutes: int | None = None,
-    late_threshold_minutes: int | None = None,
+    time_in_start: Any,
+    time_in_end: Any,
+    late_start: Any = None,
+    late_end: Any = None,
 ) -> str:
-    """Compare a scan time against session rules using Philippine Standard Time.
-
-    Present: at/before required_time_in + grace
-    Late: after grace and at/before required_time_in + late_threshold
-    Absent: after late_threshold (or Late if late_threshold is unset)
-    """
+    """Classify a scan inside the configured time-in or late time range."""
     scan = parse_clock_time(current_scan_time)
-    required = parse_clock_time(required_time_in)
-    if scan is None or required is None:
-        raise ValueError("Current scan time and required time-in must be valid.")
+    start = parse_clock_time(time_in_start)
+    end = parse_clock_time(time_in_end)
+    if scan is None or start is None or end is None or end <= start:
+        raise ValueError("Current scan time and time-in start/end must be valid.")
 
-    # Anchor both times on the same Manila calendar day for minute math.
-    day = now_manila().date()
-    scan_dt = datetime.combine(day, scan, tzinfo=MANILA_TZ)
-    required_dt = datetime.combine(day, required, tzinfo=MANILA_TZ)
-    grace = max(0, int(grace_period_minutes or 0))
-    present_until = required_dt + timedelta(minutes=grace)
-
-    if scan_dt <= present_until:
+    if start <= scan <= end:
         return "Present"
 
-    if late_threshold_minutes is None:
-        return "Late"
-
-    late_until = required_dt + timedelta(minutes=max(0, int(late_threshold_minutes)))
-    if scan_dt <= late_until:
-        return "Late"
+    if late_start is not None and late_end is not None:
+        late_from = parse_clock_time(late_start)
+        late_until = parse_clock_time(late_end)
+        if late_from is None or late_until is None or late_from <= end or late_until < late_from:
+            raise ValueError("Late period start/end must form a valid range after time-in.")
+        if late_from <= scan <= late_until:
+            return "Late"
     return "Absent"
 
 
@@ -205,12 +227,7 @@ def resolve_record_status(record: AttendanceRecord, sessions_by_key: dict[tuple[
     session = sessions_by_key.get((record.section.strip().casefold(), record.date))
     if not session:
         return record.status if record.status in {"Present", "Late", "Absent"} else "Present"
-    return determine_attendance_status(
-        record.time,
-        session.requiredTimeIn,
-        session.gracePeriodMinutes,
-        session.lateThresholdMinutes,
-    )
+    return determine_attendance_status(record.time, *session_time_ranges(session))
 
 
 class AdminLogin(BaseModel):
@@ -423,15 +440,24 @@ def ensure_schema(connection: Any) -> None:
               section VARCHAR(191) NOT NULL,
               session_date DATE NOT NULL,
               required_time_in TIME NOT NULL,
+              time_in_end TIME NULL,
+              late_start TIME NULL,
+              late_end TIME NULL,
               grace_period_minutes INT UNSIGNED NULL,
               late_threshold_minutes INT UNSIGNED NULL,
               time_out TIME NULL,
+              time_out_end TIME NULL,
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
               UNIQUE KEY one_session_per_class_day (section, session_date),
               KEY sessions_by_date (session_date, section)
             ) CHARACTER SET utf8mb4
         """)
+        cursor.execute("SHOW COLUMNS FROM attendance_sessions")
+        session_columns = {row["Field"] for row in cursor.fetchall()}
+        for column in ("time_in_end", "late_start", "late_end", "time_out_end"):
+            if column not in session_columns:
+                cursor.execute(f"ALTER TABLE attendance_sessions ADD COLUMN {column} TIME NULL")
 
 
 def jwt_secret() -> str:
@@ -876,21 +902,42 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
             cursor.execute("""SELECT id, section, DATE_FORMAT(session_date, '%Y-%m-%d') AS date,
                               TIME_FORMAT(required_time_in, '%H:%i') AS required_time_in,
                               grace_period_minutes, late_threshold_minutes,
-                              TIME_FORMAT(time_out, '%H:%i') AS time_out
+                              TIME_FORMAT(time_in_end, '%H:%i') AS time_in_end,
+                              TIME_FORMAT(late_start, '%H:%i') AS late_start,
+                              TIME_FORMAT(late_end, '%H:%i') AS late_end,
+                              TIME_FORMAT(time_out, '%H:%i') AS time_out,
+                              TIME_FORMAT(time_out_end, '%H:%i') AS time_out_end
                               FROM attendance_sessions
                               ORDER BY session_date DESC, section""")
-            sessions = [
-                {
+            sessions = []
+            for row in cursor.fetchall():
+                session = AttendanceSession(
+                    id=row["id"],
+                    section=row["section"],
+                    date=row["date"],
+                    requiredTimeIn=row["required_time_in"],
+                    timeInEnd=row["time_in_end"],
+                    lateStart=row["late_start"],
+                    lateEnd=row["late_end"],
+                    gracePeriodMinutes=row["grace_period_minutes"],
+                    lateThresholdMinutes=row["late_threshold_minutes"],
+                )
+                time_in_start, time_in_end, late_start, late_end = session_time_ranges(session)
+                sessions.append({
                     "id": row["id"],
                     "section": row["section"],
                     "date": row["date"],
-                    "requiredTimeIn": row["required_time_in"],
+                    "requiredTimeIn": time_in_start,
+                    "timeInStart": time_in_start,
+                    "timeInEnd": time_in_end,
+                    "lateStart": late_start,
+                    "lateEnd": late_end,
                     "gracePeriodMinutes": row["grace_period_minutes"],
                     "lateThresholdMinutes": row["late_threshold_minutes"],
                     "timeOut": row["time_out"],
-                }
-                for row in cursor.fetchall()
-            ]
+                    "timeOutStart": row["time_out"] if row["time_out_end"] else None,
+                    "timeOutEnd": row["time_out_end"],
+                })
     return {"students": students, "records": records, "classes": classes, "sessions": sessions}
 
 
@@ -944,16 +991,37 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
         key = (session.section.strip().casefold(), session.date)
         if key in session_keys:
             raise HTTPException(status_code=422, detail="Duplicate attendance sessions are not allowed.")
-        if not parse_clock_time(session.requiredTimeIn):
-            raise HTTPException(status_code=422, detail="Each session needs a valid required time-in.")
-        if session.timeOut and not parse_clock_time(session.timeOut):
-            raise HTTPException(status_code=422, detail="Session time-out must be a valid time.")
-        if (
-            session.gracePeriodMinutes is not None
-            and session.lateThresholdMinutes is not None
-            and session.lateThresholdMinutes < session.gracePeriodMinutes
+        time_in_start, time_in_end, late_start, late_end = session_time_ranges(session)
+        start = parse_clock_time(time_in_start)
+        end = parse_clock_time(time_in_end)
+        if start is None or end is None or end <= start:
+            raise HTTPException(status_code=422, detail="Each session needs a valid time-in start and end.")
+        has_late_start = late_start is not None
+        has_late_end = late_end is not None
+        late_from = parse_clock_time(late_start)
+        late_until = parse_clock_time(late_end)
+        if has_late_start != has_late_end or (
+            has_late_start
+            and (late_from is None or late_until is None or late_from <= end or late_until < late_from)
         ):
-            raise HTTPException(status_code=422, detail="Late threshold must be greater than or equal to grace period.")
+            raise HTTPException(status_code=422, detail="The late period must have valid start and end times after time-in.")
+        time_out_start = session.timeOutStart or session.timeOut
+        time_out_end = session.timeOutEnd
+        has_time_out_start = time_out_start is not None
+        has_time_out_end = time_out_end is not None
+        parsed_time_out_start = parse_clock_time(time_out_start)
+        parsed_time_out_end = parse_clock_time(time_out_end)
+        legacy_single_time_out = session.timeOutStart is None and session.timeOut is not None and not has_time_out_end
+        if (has_time_out_start != has_time_out_end and not legacy_single_time_out) or (
+            has_time_out_start
+            and not legacy_single_time_out
+            and (
+                parsed_time_out_start is None
+                or parsed_time_out_end is None
+                or parsed_time_out_end <= parsed_time_out_start
+            )
+        ):
+            raise HTTPException(status_code=422, detail="Time-out must have valid start and end times.")
         session_keys.add(key)
     sessions_by_key = {
         (session.section.strip().casefold(), session.date): session for session in store.sessions
@@ -981,18 +1049,24 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
             if store.sessions:
                 cursor.executemany(
                     """INSERT INTO attendance_sessions
-                    (id, section, session_date, required_time_in, grace_period_minutes,
-                     late_threshold_minutes, time_out)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    (id, section, session_date, required_time_in, time_in_end,
+                     late_start, late_end, grace_period_minutes, late_threshold_minutes,
+                     time_out, time_out_end)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     [
                         (
                             session.id,
                             session.section.strip(),
                             session.date,
-                            format_time_hhmm(session.requiredTimeIn),
+                            format_time_hhmm(session.timeInStart or session.requiredTimeIn),
+                            format_time_hhmm(session.timeInEnd) if session.timeInEnd else None,
+                            format_time_hhmm(session.lateStart) if session.lateStart else None,
+                            format_time_hhmm(session.lateEnd) if session.lateEnd else None,
                             session.gracePeriodMinutes,
                             session.lateThresholdMinutes,
-                            format_time_hhmm(session.timeOut) if session.timeOut else None,
+                            format_time_hhmm(session.timeOutStart or session.timeOut)
+                            if session.timeOutStart or session.timeOut else None,
+                            format_time_hhmm(session.timeOutEnd) if session.timeOutEnd else None,
                         )
                         for session in store.sessions
                     ],

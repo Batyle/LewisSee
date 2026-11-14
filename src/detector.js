@@ -29,14 +29,6 @@ function options() {
   });
 }
 
-export async function warmDetector(canvas) {
-  const ctx = canvas.getContext("2d", { willReadFrequently: true });
-  ctx.fillStyle = "#000";
-  ctx.fillRect(0, 0, canvas.width, canvas.height);
-  // Warm WebGL kernels before the live feed is displayed.
-  for (let i = 0; i < 2; i += 1) await detect(canvas);
-}
-
 export async function detect(canvas) {
   if (!faceapi) throw new Error("Detector has not loaded.");
   // face-api disposes its intermediate tensors internally; results are plain typed arrays.
