@@ -1,5 +1,4 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import emailjs from "@emailjs/browser";
 import {
   cameraErrorMessage,
   createInferenceCanvas,
@@ -20,14 +19,13 @@ import { loadAttendanceStore, saveAttendanceStore } from "./attendanceApi";
 import {
   determineAttendanceStatus,
   formatClock12Hour,
-  formatEmailDate,
-  formatEmailTime,
   isAttendancePolicyReady,
   liveAttendancePhaseAt,
   nowManilaTime,
   sessionTimeRanges,
   todayManila,
 } from "./attendancePolicy";
+import { emailErrorMessage, sendAttendanceEmail } from "./api/studentAttendanceEmail";
 import { applyTheme, getTheme, watchSystemTheme } from "./theme";
 import LoadingScreen from "./components/LoadingScreen";
 import LewisSeeLogo from "./components/LewisSeeLogo";
@@ -129,48 +127,6 @@ const verifyLiveness = async (canvas) => {
   if (!response.ok) throw new Error(`Liveness service returned ${response.status}.`);
   return response.json();
 };
-const sendAttendanceEmail = async (student, record, attendancePhoto) => {
-  const serviceId = import.meta.env.VITE_EMAILJS_SERVICE_ID?.trim() || "service_sa8ojt8";
-  const templateId = import.meta.env.VITE_EMAILJS_TEMPLATE_ID?.trim() || "template_986zsnj";
-  const publicKey = import.meta.env.VITE_EMAILJS_PUBLIC_KEY?.trim() || "8nvcTW8G6rXutzdGM";
-  const recipient = student.email?.trim();
-
-  if (!recipient) throw new Error("This student does not have an email address.");
-
-  const statusStyles = {
-    Present: { color: "#087957", background: "#e6fbf5" },
-    Late: { color: "#9a5700", background: "#fff3d6" },
-    Absent: { color: "#b42318", background: "#ffebe9" },
-  }[record.status];
-  if (!statusStyles) throw new Error("Attendance status is invalid; the email was not sent.");
-
-  await emailjs.send(serviceId, templateId, {
-    to_email: recipient,
-    recipient_email: recipient,
-    student_email: recipient,
-    email: recipient,
-    to_name: student.name,
-    student_name: student.name,
-    student_id: student.studentId,
-    class_name: record.section,
-    attendance_date: formatEmailDate(record.date),
-    attendance_time: formatEmailTime(record.time),
-    attendance_status: record.status,
-    status_color: statusStyles.color,
-    status_background: statusStyles.background,
-    message: `Your attendance was recorded as ${record.status}. A photo from the verified face scan is attached.`,
-    attendance_photo: attendancePhoto,
-  }, {
-    publicKey,
-  });
-  return true;
-};
-
-const emailErrorMessage = (error) => {
-  const detail = typeof error?.text === "string" ? error.text : error?.message;
-  return detail ? `Email could not be sent: ${detail}` : "Email could not be sent.";
-};
-
 const Loader = memo(({ stage, error, elapsed, retry, requested, starting }) => (
   <div className="pipeline-status" aria-live="polite">
     {starting && <div className="spinner" />}
