@@ -8,7 +8,7 @@ function buildDecisionParams(instructor, decision, password = "") {
   const recipient = instructor.email.trim();
   const replyTo = import.meta.env.VITE_ADMIN_NOTIFICATION_REPLY_TO?.trim() || recipient;
   const message = approved
-    ? `Your instructor access request has been approved. Your instructor ID is ${instructor.instructorId || "being assigned"}. You can now sign in to LewisSee.`
+    ? `Your instructor access request has been approved. Your instructor ID is ${instructor.instructorId || "being assigned"}. Sign in using ${recipient} at LewisSee.`
     : suspended
       ? "Your LewisSee instructor account has been suspended. Please contact an administrator for assistance."
       : "Your instructor access request has been denied.";
@@ -16,6 +16,7 @@ function buildDecisionParams(instructor, decision, password = "") {
   return {
     to_email: recipient,
     recipient_email: recipient,
+    instructor_email: recipient,
     to_name: instructor.name,
     email: recipient,
     reply_to: replyTo,
@@ -58,6 +59,7 @@ export async function sendInstructorUpdateEmail(instructor, changedFields, passw
       {
         to_email: recipient,
         recipient_email: recipient,
+        instructor_email: recipient,
         to_name: instructor.name,
         email: recipient,
         reply_to: replyTo,

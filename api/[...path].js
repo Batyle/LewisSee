@@ -74,7 +74,7 @@ async function notifyInstructorDecision(instructor, decision) {
   const suspended = decision === "suspended";
   const recipient = instructor.email.trim();
   const message = approved
-    ? `Your instructor access request has been approved. Your instructor ID is ${instructor.instructorId || "being assigned"}. You can now sign in to LewisSee.`
+    ? `Your instructor access request has been approved. Your instructor ID is ${instructor.instructorId || "being assigned"}. Sign in using ${recipient} at LewisSee.`
     : suspended
       ? "Your LewisSee instructor account has been suspended. Please contact an administrator for assistance."
       : "Your instructor access request has been denied.";
