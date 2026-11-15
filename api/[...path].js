@@ -15,7 +15,7 @@ const respond = (res, code, body) => res.status(code).json(body);
 
 const LIVE_SITE_ORIGIN = "https://lewis-see.vercel.app";
 
-async function sendEmailJs(credentials, templateParams) {
+async function sendEmailJs(credentials, templateParams, { maxAttempts = 3 } = {}) {
   await sendWithRetry(async () => {
     const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
       method: "POST",
@@ -37,7 +37,7 @@ async function sendEmailJs(credentials, templateParams) {
       throw error;
     }
     return emailResponse;
-  }, { maxAttempts: 3 });
+  }, { maxAttempts });
   return true;
 }
 
@@ -148,7 +148,9 @@ async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
           recipient_email: recipient,
           email: recipient,
           to_name: "Administrator",
-          subject: `New LewisSee instructor access request from ${instructor.name}`,
+          from_name: "LewisSee Instructor Requests",
+          reply_to: instructor.email,
+          subject: "Instructor access request - LewisSee",
           instructor_name: instructor.name,
           instructor_email: instructor.email,
           decision: "pending",
@@ -156,8 +158,8 @@ async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
           instructor_id: "",
           requested_blocks: requestedBlocks,
           submitted_at: new Date().toISOString(),
-          message: `${instructor.name} (${instructor.email}) submitted a new instructor access request. Requested blocks: ${requestedBlocks}. Review it in the LewisSee admin console.`,
-        });
+          message: `${instructor.name} submitted an instructor access request. Requested blocks: ${requestedBlocks}. Review the request in your LewisSee admin console.`,
+        }, { maxAttempts: 1 });
         return true;
       } catch (error) {
         console.warn("EmailJS instructor request notice failed.", error?.message || error);
