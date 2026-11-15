@@ -1,12 +1,7 @@
 import emailjs from "@emailjs/browser";
 import { formatEmailDate, formatEmailTime } from "../attendancePolicy.js";
 import { sendWithRetry } from "./emailRetry.js";
-
-// Authoritative student attendance EmailJS credentials (do not let stale Vercel env override these).
-// Keep separate from admin → instructor EmailJS (service_42lrlwk / template_cgf0ftr).
-export const STUDENT_EMAILJS_SERVICE_ID = "service_sa8ojt8";
-export const STUDENT_EMAILJS_TEMPLATE_ID = "template_986zsnj";
-const STUDENT_EMAILJS_PUBLIC_KEY = "8nvcTW8G6rXutzdGM";
+import { STUDENT_ATTENDANCE_EMAILJS } from "./emailConfig.js";
 
 const STATUS_STYLES = {
   Present: { color: "#087957", background: "#e6fbf5" },
@@ -23,8 +18,8 @@ export async function sendAttendanceEmail(student, record, attendancePhoto, opti
 
   await sendWithRetry(
     () => emailjs.send(
-      STUDENT_EMAILJS_SERVICE_ID,
-      STUDENT_EMAILJS_TEMPLATE_ID,
+      STUDENT_ATTENDANCE_EMAILJS.serviceId,
+      STUDENT_ATTENDANCE_EMAILJS.templateId,
       {
         to_email: recipient,
         recipient_email: recipient,
@@ -42,7 +37,7 @@ export async function sendAttendanceEmail(student, record, attendancePhoto, opti
         message: `Your attendance was recorded as ${record.status}. A photo from the verified face scan is attached.`,
         attendance_photo: attendancePhoto,
       },
-      { publicKey: STUDENT_EMAILJS_PUBLIC_KEY },
+      { publicKey: STUDENT_ATTENDANCE_EMAILJS.publicKey },
     ),
     options,
   );

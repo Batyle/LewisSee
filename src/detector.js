@@ -6,18 +6,33 @@ export const INFERENCE_WIDTH = 320;
 export const INFERENCE_HEIGHT = 240;
 let faceapi;
 let loaded = false;
+let detectorPromise;
 
-export async function loadDetector() {
-  if (loaded) return faceapi;
-  // Dynamic import keeps TensorFlow and model code out of the initial UI bundle.
-  faceapi = await import("face-api.js");
-  await Promise.all([
-    faceapi.nets.tinyFaceDetector.loadFromUri(MODEL_URL),
-    faceapi.nets.faceLandmark68TinyNet.loadFromUri(MODEL_URL),
-    faceapi.nets.faceRecognitionNet.loadFromUri(MODEL_URL),
-  ]);
-  loaded = true;
-  return faceapi;
+export function loadDetector() {
+  if (loaded) return Promise.resolve(faceapi);
+  if (detectorPromise) return detectorPromise;
+
+  detectorPromise = (async () => {
+    // Dynamic import keeps TensorFlow and model code out of the initial UI bundle.
+    faceapi = await import("face-api.js");
+    const models = [
+      faceapi.nets.tinyFaceDetector,
+      faceapi.nets.faceLandmark68TinyNet,
+      faceapi.nets.faceRecognitionNet,
+    ];
+    await Promise.all(
+      models
+        .filter((model) => !model.isLoaded)
+        .map((model) => model.loadFromUri(MODEL_URL)),
+    );
+    loaded = true;
+    return faceapi;
+  })().catch((error) => {
+    detectorPromise = undefined;
+    throw error;
+  });
+
+  return detectorPromise;
 }
 
 function options() {

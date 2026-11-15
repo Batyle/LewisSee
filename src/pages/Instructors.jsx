@@ -114,11 +114,11 @@ export default function Instructors() {
       let actionNotice = result.message || "Instructor updated.";
       if (emailDecision && result.instructor?.email) {
         if (result.emailSent) {
-          actionNotice += ` Email notification sent to ${result.instructor.email}.`;
+          actionNotice += ` EmailJS accepted the notification for ${result.instructor.email}; inbox delivery is not confirmed.`;
         } else {
           try {
             await sendInstructorDecisionEmail(result.instructor, emailDecision);
-            actionNotice += ` Email notification sent to ${result.instructor.email}.`;
+            actionNotice += ` EmailJS accepted the notification for ${result.instructor.email}; inbox delivery is not confirmed.`;
           } catch (cause) {
             const emailError = getEmailFailure(result.emailError, cause);
             actionNotice += ` The account was updated, but the email could not be sent: ${emailError}`;
@@ -147,7 +147,7 @@ export default function Instructors() {
     setNotice("");
     try {
       const result = await sendInstructorNotification(person.uid);
-      setNotice(`${result.message} This confirms EmailJS accepted it, not inbox delivery.`);
+      setNotice(result.message);
     } catch (cause) {
       setError(cause.message || "EmailJS could not send the instructor notification.");
     } finally {
@@ -182,11 +182,11 @@ export default function Instructors() {
       let actionNotice = result.message || "Instructor details updated.";
       if (changedFields.length && result.instructor?.email) {
         if (result.emailSent) {
-          actionNotice += ` Email notification sent to ${result.instructor.email}.`;
+          actionNotice += ` EmailJS accepted the notification for ${result.instructor.email}; inbox delivery is not confirmed.`;
         } else {
           try {
             await sendInstructorUpdateEmail(result.instructor, changedFields, editForm.newPassword);
-            actionNotice += ` Email notification sent to ${result.instructor.email}.`;
+            actionNotice += ` EmailJS accepted the notification for ${result.instructor.email}; inbox delivery is not confirmed.`;
           } catch (cause) {
             actionNotice += ` The account was updated, but the email could not be sent: ${getEmailFailure(result.emailError, cause)}`;
           }

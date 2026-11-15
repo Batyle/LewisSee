@@ -1,10 +1,6 @@
 import emailjs from "@emailjs/browser";
 import { sendWithRetry } from "./emailRetry.js";
-import {
-  ADMIN_EMAILJS_PUBLIC_KEY,
-  ADMIN_EMAILJS_SERVICE_ID,
-  ADMIN_EMAILJS_TEMPLATE_ID,
-} from "./instructorEmailConfig.js";
+import { ADMIN_INSTRUCTOR_EMAILJS } from "./emailConfig.js";
 
 function buildDecisionParams(instructor, decision, password = "") {
   const approved = decision === "approved";
@@ -40,10 +36,10 @@ export async function sendInstructorDecisionEmail(instructor, decision) {
 
   return sendWithRetry(
     () => emailjs.send(
-      ADMIN_EMAILJS_SERVICE_ID,
-      ADMIN_EMAILJS_TEMPLATE_ID,
+      ADMIN_INSTRUCTOR_EMAILJS.serviceId,
+      ADMIN_INSTRUCTOR_EMAILJS.templateId,
       buildDecisionParams(instructor, decision),
-      { publicKey: ADMIN_EMAILJS_PUBLIC_KEY },
+      { publicKey: ADMIN_INSTRUCTOR_EMAILJS.publicKey },
     ),
   );
 }
@@ -57,8 +53,8 @@ export async function sendInstructorUpdateEmail(instructor, changedFields, passw
 
   return sendWithRetry(
     () => emailjs.send(
-      ADMIN_EMAILJS_SERVICE_ID,
-      ADMIN_EMAILJS_TEMPLATE_ID,
+      ADMIN_INSTRUCTOR_EMAILJS.serviceId,
+      ADMIN_INSTRUCTOR_EMAILJS.templateId,
       {
         to_email: recipient,
         recipient_email: recipient,
@@ -74,7 +70,7 @@ export async function sendInstructorUpdateEmail(instructor, changedFields, passw
         changed_fields: changedFields.join(", "),
         message: `An administrator updated your instructor account: ${changedFields.join(", ")}. Contact your administrator if you did not expect this change.`,
       },
-      { publicKey: ADMIN_EMAILJS_PUBLIC_KEY },
+      { publicKey: ADMIN_INSTRUCTOR_EMAILJS.publicKey },
     ),
   );
 }

@@ -87,6 +87,12 @@ const formatDate = (value) => {
   return `${year}-${monthName}-${day}`;
 };
 const normalize = (value) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+const toFaceVector = (descriptor) => {
+  if (!Array.isArray(descriptor) && !(descriptor instanceof Float32Array)) return null;
+  if (descriptor.length !== 128) return null;
+  const vector = Float32Array.from(descriptor);
+  return vector.every(Number.isFinite) ? vector : null;
+};
 const currentStudentIdYear = () => String(new Date().getFullYear());
 const studentIdFields = (studentId = "") => {
   const match = /^C-(\d{4})-(\d{3})$/.exec(studentId);
@@ -118,6 +124,30 @@ const timed = (promise, message, timeout = TIMEOUT) =>
       setTimeout(() => reject(new Error(message)), timeout),
     ),
   ]);
+const waitForVideoReady = (video, timeout = 15000) => {
+  if (video.readyState >= 2) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      video.removeEventListener("loadeddata", onReady);
+      video.removeEventListener("error", onError);
+    };
+    const onReady = () => {
+      cleanup();
+      resolve();
+    };
+    const onError = () => {
+      cleanup();
+      reject(new Error("The camera stream could not be displayed."));
+    };
+    const timer = setTimeout(() => {
+      cleanup();
+      reject(new Error("The camera preview did not start within 15 seconds. Retry the scanner."));
+    }, timeout);
+    video.addEventListener("loadeddata", onReady, { once: true });
+    video.addEventListener("error", onError, { once: true });
+  });
+};
 const toDataUrl = (file) =>
   new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -272,8 +302,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   useEffect(() => {
     store("attendance-students", students);
     roster.current = students
-      .filter((s) => s.descriptor)
-      .map((s) => ({ ...s, vector: new Float32Array(s.descriptor) }));
+      .map((student) => ({ ...student, vector: toFaceVector(student.descriptor) }))
+      .filter((student) => student.vector);
   }, [students]);
   useEffect(() => {
     selectedClass.current = { course, yearLevel, block };
@@ -706,24 +736,29 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         if (!drawImageCover(context, video.current, INFERENCE_WIDTH, INFERENCE_HEIGHT))
           return;
         const detected = await detect(frame.current);
+        const activeClass = selectedClass.current;
+        const classRoster = roster.current.filter((student) =>
+          belongsToClass(student, activeClass.course, activeClass.yearLevel, activeClass.block),
+        );
         const matches = detected.map((face) => {
           let best,
             score = Infinity;
-          const activeClass = selectedClass.current;
-          roster.current
-            .filter((student) => belongsToClass(student, activeClass.course, activeClass.yearLevel, activeClass.block))
-            .forEach((student) => {
+          classRoster.forEach((student) => {
             const value = distance(face.descriptor, student.vector);
             if (value < score) {
               score = value;
               best = student;
             }
-            });
+          });
           return best && score < MATCH_DISTANCE_THRESHOLD
-            ? { student: best, score: Math.round((1 - score / 0.7) * 100) }
+            ? { student: best, score: Math.round((1 - score / 0.7) * 100), distance: score }
             : null;
         });
-        const found = matches.find(Boolean);
+        const found = matches.reduce(
+          (best, candidate) =>
+            candidate && (!best || candidate.distance < best.distance) ? candidate : best,
+          null,
+        );
         let liveness;
         let livenessFailed = false;
         // Always read the live session from a ref. A requestAnimationFrame loop
@@ -821,7 +856,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                   : found
                     ? "Face recognized. Waiting for the liveness service."
                     : detected.length
-                      ? "Face found, but no enrolled student matched."
+                      ? classRoster.length
+                        ? "Face found, but no enrolled student matched."
+                        : "No valid face profiles are enrolled for this selected class."
                       : "Looking for a face…",
         });
         const spent = performance.now() - start;
@@ -833,6 +870,10 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           });
       } catch (scanError) {
         console.warn("Face scan failed", scanError);
+        ui({
+          count: 0,
+          message: `Face recognition error: ${scanError?.message || "Unable to process the camera frame."}`,
+        });
       } finally {
         busy.current = false;
       }
@@ -906,23 +947,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
 
       stream.current = cameraStream;
       video.current.srcObject = cameraStream;
-      if (video.current.readyState < 2) {
-        await new Promise((resolve, reject) => {
-          const node = video.current;
-          const onReady = () => {
-            node.removeEventListener("loadeddata", onReady);
-            node.removeEventListener("error", onError);
-            resolve();
-          };
-          const onError = () => {
-            node.removeEventListener("loadeddata", onReady);
-            node.removeEventListener("error", onError);
-            reject(new Error("The camera stream could not be displayed."));
-          };
-          node.addEventListener("loadeddata", onReady, { once: true });
-          node.addEventListener("error", onError, { once: true });
-        });
-      }
+      await waitForVideoReady(video.current);
       await video.current.play();
       if (!mounted.current) return;
       setCameraConnected(true);

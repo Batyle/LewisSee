@@ -5,40 +5,25 @@ import { listBlocks } from "./_lib/blocks.js";
 import { getDatabaseErrorMessage } from "./_lib/databaseErrorMessage.js";
 import { getPool } from "./_lib/database.js";
 import { sendWithRetry } from "../src/api/emailRetry.js";
-import {
-  ADMIN_EMAILJS_PUBLIC_KEY,
-  ADMIN_EMAILJS_SERVICE_ID,
-  ADMIN_EMAILJS_TEMPLATE_ID,
-} from "../src/api/instructorEmailConfig.js";
+import { ADMIN_INSTRUCTOR_EMAILJS } from "../src/api/emailConfig.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const respond = (res, code, body) => res.status(code).json(body);
 
 const LIVE_SITE_ORIGIN = "https://lewis-see.vercel.app";
 
-function resolveEmailJsOrigin(req) {
-  const fromHeader = typeof req?.headers?.origin === "string" ? req.headers.origin.trim() : "";
-  if (fromHeader.startsWith("https://")) return fromHeader;
-  const host = String(req?.headers?.["x-forwarded-host"] || req?.headers?.host || "").split(",")[0].trim();
-  if (host && !/^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)) {
-    const proto = String(req?.headers?.["x-forwarded-proto"] || "https").split(",")[0].trim() || "https";
-    return `${proto}://${host}`;
-  }
-  return process.env.EMAILJS_ORIGIN?.trim() || process.env.CLIENT_URL?.split(",")[0]?.trim() || LIVE_SITE_ORIGIN;
-}
-
-async function sendAdminEmailJs(templateParams, req) {
+async function sendAdminEmailJs(templateParams) {
   await sendWithRetry(async () => {
     const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Origin: resolveEmailJsOrigin(req),
+        Origin: LIVE_SITE_ORIGIN,
       },
       body: JSON.stringify({
-        service_id: ADMIN_EMAILJS_SERVICE_ID,
-        template_id: ADMIN_EMAILJS_TEMPLATE_ID,
-        user_id: ADMIN_EMAILJS_PUBLIC_KEY,
+        service_id: ADMIN_INSTRUCTOR_EMAILJS.serviceId,
+        template_id: ADMIN_INSTRUCTOR_EMAILJS.templateId,
+        user_id: ADMIN_INSTRUCTOR_EMAILJS.publicKey,
         template_params: templateParams,
       }),
     });
@@ -53,7 +38,7 @@ async function sendAdminEmailJs(templateParams, req) {
   return true;
 }
 
-async function notifyInstructorDecision(instructor, decision, req) {
+async function notifyInstructorDecision(instructor, decision) {
   if (!instructor?.email?.trim()) return false;
   const approved = decision === "approved";
   const suspended = decision === "suspended";
@@ -77,11 +62,11 @@ async function notifyInstructorDecision(instructor, decision, req) {
     password: approved ? "Use the password you set during registration" : "",
     message,
     reason: instructor.rejectionReason || "",
-  }, req);
+  });
   return true;
 }
 
-async function notifyInstructorUpdate(instructor, changedFields, req, password = "") {
+async function notifyInstructorUpdate(instructor, changedFields, password = "") {
   if (!instructor?.email?.trim() || !changedFields?.length) return false;
   const recipient = instructor.email.trim();
   await sendAdminEmailJs({
@@ -98,11 +83,11 @@ async function notifyInstructorUpdate(instructor, changedFields, req, password =
     reason: "",
     changed_fields: changedFields.join(", "),
     message: `An administrator updated your instructor account: ${changedFields.join(", ")}. Contact your administrator if you did not expect this change.`,
-  }, req);
+  });
   return true;
 }
 
-async function notifyAdminsOfInstructorRequest(pool, instructor, blocks, req) {
+async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
   try {
     const [admins] = await pool.execute(
       "SELECT email FROM admins WHERE role = 'admin' AND email <> ''",
@@ -130,7 +115,7 @@ async function notifyAdminsOfInstructorRequest(pool, instructor, blocks, req) {
           requested_blocks: requestedBlocks,
           reply_to: instructor.email,
           message: `${instructor.name} (${instructor.email}) submitted a new instructor access request. Requested blocks: ${requestedBlocks}. Review it in the LewisSee admin console.`,
-        }, req);
+        });
         return true;
       } catch (error) {
         console.warn("EmailJS instructor request notice failed.", error?.message || error);
@@ -335,11 +320,11 @@ async function handleAdmin(req, res, path, pool) {
     }
 
     try {
-      await notifyInstructorDecision(instructor, decision, req);
+      await notifyInstructorDecision(instructor, decision);
       return respond(res, 200, {
         instructor,
         emailSent: true,
-        message: `EmailJS accepted the notification for ${instructor.email}.`,
+        message: `EmailJS accepted the notification for ${instructor.email}; inbox delivery is not confirmed.`,
       });
     } catch (error) {
       console.warn("EmailJS instructor notification retry failed.", error?.message || error);
@@ -410,7 +395,7 @@ async function handleAdmin(req, res, path, pool) {
     let emailError = "";
     if (changedFields.length) {
       try {
-        emailSent = await notifyInstructorUpdate(updatedInstructor, changedFields, req, newPassword);
+        emailSent = await notifyInstructorUpdate(updatedInstructor, changedFields, newPassword);
       } catch (error) {
         emailError = error?.message || "EmailJS error.";
         console.warn("EmailJS instructor update notice failed.", emailError);
@@ -466,7 +451,7 @@ async function handleAdmin(req, res, path, pool) {
   let emailSent = false;
   let emailError = "";
   try {
-    emailSent = await notifyInstructorDecision(updatedInstructor, emailDecision, req);
+    emailSent = await notifyInstructorDecision(updatedInstructor, emailDecision);
   } catch (error) {
     emailError = error?.message || "EmailJS error.";
     console.warn("EmailJS instructor decision notice failed.", emailError);
@@ -519,7 +504,6 @@ async function handleInstructorAuth(req, res, action, pool) {
       pool,
       { name, email },
       selected,
-      req,
     );
     return respond(res, 201, {
       instructor: { id: uid, uid, name, email, status: "pending" },
