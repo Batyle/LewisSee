@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { getNotificationSettings, saveNotificationEmail } from "../api/adminApi";
 
@@ -16,11 +16,12 @@ export default function Notifications() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const emailDraftChanged = useRef(false);
 
   const refresh = useCallback(async (isActive = () => true) => {
     const data = await getNotificationSettings();
     if (!isActive()) return;
-    setRecipientEmail(data.recipientEmail || "");
+    if (!emailDraftChanged.current) setRecipientEmail(data.recipientEmail || "");
     setPendingCount(data.pendingCount || 0);
     setPendingRequests(data.pendingRequests || []);
     setLoading(false);
@@ -41,10 +42,19 @@ export default function Notifications() {
     };
 
     void update();
-    const intervalId = window.setInterval(update, 20000);
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void update();
+    };
+    const intervalId = window.setInterval(refreshWhenVisible, 20000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("online", refreshWhenVisible);
     return () => {
       active = false;
       window.clearInterval(intervalId);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("online", refreshWhenVisible);
     };
   }, [refresh]);
 
@@ -55,6 +65,8 @@ export default function Notifications() {
     setNotice("");
     try {
       const result = await saveNotificationEmail(recipientEmail.trim());
+      emailDraftChanged.current = false;
+      setRecipientEmail(result.recipientEmail || "");
       setNotice(result.message || "Notification email saved.");
       await refresh();
     } catch (cause) {
@@ -98,7 +110,10 @@ export default function Notifications() {
               maxLength={255}
               required
               value={recipientEmail}
-              onChange={(event) => setRecipientEmail(event.target.value)}
+              onChange={(event) => {
+                emailDraftChanged.current = true;
+                setRecipientEmail(event.target.value);
+              }}
               placeholder="admin@example.com"
             />
             <button type="submit" className="admin-action-approve" disabled={saving || loading}>

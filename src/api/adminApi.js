@@ -20,10 +20,16 @@ const request = async (path, options = {}) => {
       "Could not reach the admin API. Confirm the Vercel deployment and that DB_* plus ADMIN_JWT_SECRET are set.",
     );
   }
-  const body = await response.json().catch(() => ({}));
+  const responseText = await response.text();
+  let body = {};
+  try {
+    body = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    body = {};
+  }
   if (!response.ok) {
     const message = [body.message || body.detail, body.emailError].filter(Boolean).join(" ");
-    const error = new Error(message || "Unable to complete the request.");
+    const error = new Error(message || `Admin API request failed (HTTP ${response.status}).`);
     error.status = response.status;
     throw error;
   }

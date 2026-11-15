@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   approveInstructor,
   deleteInstructor,
@@ -49,52 +49,66 @@ export default function Instructors() {
   const [busyUid, setBusyUid] = useState("");
   const [editingInstructor, setEditingInstructor] = useState(null);
   const [editForm, setEditForm] = useState({ name: "", instructorId: "", newPassword: "" });
+  const loadSequence = useRef(0);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError("");
+  const applyInstructorList = useCallback((data) => {
+    setInstructors(data.instructors || []);
+    setCounts({
+      pending: data.counts?.pending ?? 0,
+      active: data.counts?.active ?? 0,
+      blocked: data.counts?.blocked ?? 0,
+    });
+  }, []);
+
+  const load = useCallback(async ({ reportError = true } = {}) => {
+    const sequence = ++loadSequence.current;
     try {
       const data = await listInstructors();
-      setInstructors(data.instructors || []);
-      setCounts({
-        pending: data.counts?.pending ?? 0,
-        active: data.counts?.active ?? 0,
-        blocked: data.counts?.blocked ?? 0,
-      });
+      if (sequence !== loadSequence.current) return sequence;
+      if (reportError) setError("");
+      applyInstructorList(data);
     } catch (cause) {
-      setError(cause.message || "Unable to load instructor requests.");
-      setInstructors([]);
-      setCounts({ pending: 0, active: 0, blocked: 0 });
-    } finally {
-      setLoading(false);
+      if (sequence !== loadSequence.current) return sequence;
+      if (reportError) setError(cause.message || "Unable to load instructor requests.");
     }
-  }, []);
+    return sequence;
+  }, [applyInstructorList]);
 
   useEffect(() => {
-    let active = true;
+    const refresh = () => {
+      if (document.visibilityState === "visible") {
+        void load({ reportError: false }).then((sequence) => {
+          if (sequence === loadSequence.current) setLoading(false);
+        });
+      }
+    };
+    const sequence = ++loadSequence.current;
     listInstructors()
       .then((data) => {
-        if (!active) return;
-        setInstructors(data.instructors || []);
-        setCounts({
-          pending: data.counts?.pending ?? 0,
-          active: data.counts?.active ?? 0,
-          blocked: data.counts?.blocked ?? 0,
-        });
+        if (sequence !== loadSequence.current) return;
+        setError("");
+        applyInstructorList(data);
       })
       .catch((cause) => {
-        if (!active) return;
-        setError(cause.message || "Unable to load instructor requests.");
-        setInstructors([]);
-        setCounts({ pending: 0, active: 0, blocked: 0 });
+        if (sequence === loadSequence.current) {
+          setError(cause.message || "Unable to load instructor requests.");
+        }
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (sequence === loadSequence.current) setLoading(false);
       });
+    const intervalId = window.setInterval(refresh, 20000);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    window.addEventListener("online", refresh);
     return () => {
-      active = false;
+      window.clearInterval(intervalId);
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+      window.removeEventListener("online", refresh);
+      loadSequence.current += 1;
     };
-  }, []);
+  }, [applyInstructorList, load]);
 
   const pending = useMemo(
     () => instructors.filter((person) => person.status === "pending"),
@@ -243,7 +257,17 @@ export default function Instructors() {
             <h2>Pending requests</h2>
             <p>New access requests are loaded from the live database.</p>
           </div>
-          <button type="button" className="admin-refresh" onClick={load} disabled={Boolean(busyUid)}>
+          <button
+            type="button"
+            className="admin-refresh"
+            onClick={() => {
+              setLoading(true);
+              void load().then((sequence) => {
+                if (sequence === loadSequence.current) setLoading(false);
+              });
+            }}
+            disabled={Boolean(busyUid)}
+          >
             Refresh
           </button>
         </div>
