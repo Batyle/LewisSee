@@ -120,13 +120,6 @@ export default function Notifications() {
               {saving ? "Saving…" : "Save email"}
             </button>
           </div>
-          <p>
-            In EmailJS, set To Email to <code>{"{{to_email}}"}</code>, Reply-To to
-            <code>{"{{reply_to}}"}</code>, and From Name to <code>{"{{from_name}}"}</code>. Use
-            the connected, verified sender address (never the applicant’s email as From), and
-            configure SPF/DKIM for a custom sending domain. Check spam placement in the sender
-            provider; LewisSee never emails passwords.
-          </p>
         </form>
         {error && <p className="alert error-alert" role="alert">{error}</p>}
         {notice && <p className="alert success-alert" role="status">{notice}</p>}
