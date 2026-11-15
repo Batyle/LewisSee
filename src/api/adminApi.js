@@ -22,7 +22,8 @@ const request = async (path, options = {}) => {
   }
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
-    const error = new Error(body.message || body.detail || "Unable to complete the request.");
+    const message = [body.message || body.detail, body.emailError].filter(Boolean).join(" ");
+    const error = new Error(message || "Unable to complete the request.");
     error.status = response.status;
     throw error;
   }
@@ -46,6 +47,8 @@ export const getCurrentAdmin = () => request("/me").then((response) => response.
 export const clearAdminSession = () => localStorage.removeItem(tokenKey);
 export const hasAdminSession = () => Boolean(localStorage.getItem(tokenKey));
 export const listInstructors = () => request("/instructors");
+export const sendInstructorNotification = (uid) =>
+  request(`/instructors/${encodeURIComponent(uid)}/notify`, { method: "POST" });
 export const approveInstructor = (uid) =>
   request(`/instructors/${encodeURIComponent(uid)}/approve`, { method: "POST" });
 export const rejectInstructor = (uid, reason = "") =>

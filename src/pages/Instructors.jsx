@@ -4,6 +4,7 @@ import {
   deleteInstructor,
   listInstructors,
   rejectInstructor,
+  sendInstructorNotification,
   suspendInstructor,
   updateInstructor,
 } from "../api/adminApi";
@@ -28,6 +29,15 @@ const formatWhen = (value) => {
   if (!value) return "Unknown date";
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
+};
+
+const getEmailFailure = (serverError, clientError) => {
+  const browserError = clientError?.text
+    ? `EmailJS HTTP ${clientError.status}: ${clientError.text}`
+    : clientError?.message;
+  const details = [serverError, browserError].filter((value, index, errors) =>
+    value && errors.indexOf(value) === index);
+  return details.join(" | ") || "EmailJS error.";
 };
 
 export default function Instructors() {
@@ -110,9 +120,7 @@ export default function Instructors() {
             await sendInstructorDecisionEmail(result.instructor, emailDecision);
             actionNotice += ` Email notification sent to ${result.instructor.email}.`;
           } catch (cause) {
-            const emailError = result.emailError
-              || (cause?.text ? `EmailJS HTTP ${cause.status}: ${cause.text}` : cause.message)
-              || "EmailJS error.";
+            const emailError = getEmailFailure(result.emailError, cause);
             actionNotice += ` The account was updated, but the email could not be sent: ${emailError}`;
           }
         }
@@ -131,6 +139,20 @@ export default function Instructors() {
       `Permanently delete ${person.name} (${person.email})? This cannot be undone and may remove linked records.`,
     );
     if (confirmed) void runAction(person.uid, () => deleteInstructor(person.uid));
+  };
+
+  const resendInstructorEmail = async (person) => {
+    setBusyUid(person.uid);
+    setError("");
+    setNotice("");
+    try {
+      const result = await sendInstructorNotification(person.uid);
+      setNotice(`${result.message} This confirms EmailJS accepted it, not inbox delivery.`);
+    } catch (cause) {
+      setError(cause.message || "EmailJS could not send the instructor notification.");
+    } finally {
+      setBusyUid("");
+    }
   };
 
   const beginEdit = (person) => {
@@ -166,7 +188,7 @@ export default function Instructors() {
             await sendInstructorUpdateEmail(result.instructor, changedFields, editForm.newPassword);
             actionNotice += ` Email notification sent to ${result.instructor.email}.`;
           } catch (cause) {
-            actionNotice += ` The account was updated, but the email could not be sent: ${result.emailError || cause.message || "EmailJS error."}`;
+            actionNotice += ` The account was updated, but the email could not be sent: ${getEmailFailure(result.emailError, cause)}`;
           }
         }
       }
@@ -245,6 +267,14 @@ export default function Instructors() {
                   </div>
                 </div>
                 <div className="admin-person-actions">
+                  <button
+                    type="button"
+                    className="admin-refresh"
+                    disabled={Boolean(busyUid)}
+                    onClick={() => resendInstructorEmail(person)}
+                  >
+                    {busyUid === person.uid ? "Sending…" : "Resend email"}
+                  </button>
                   <button
                     type="button"
                     className="admin-action-approve"

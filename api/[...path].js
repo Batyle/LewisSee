@@ -315,6 +315,41 @@ async function handleAdmin(req, res, path, pool) {
     });
   }
 
+  if (action === "instructors" && path.length === 4 && path[3] === "notify" && req.method === "POST") {
+    const [rows] = await pool.execute(
+      `SELECT uid, instructor_id, name, email, status, assigned_blocks, rejection_reason, created_at
+       FROM instructors WHERE uid = ?`,
+      [path[2]],
+    );
+    if (!rows.length) return respond(res, 404, { message: "Instructor was not found." });
+
+    const instructor = serializeInstructor(rows[0]);
+    const decisions = {
+      active: "approved",
+      rejected: "rejected",
+      suspended: "suspended",
+    };
+    const decision = decisions[instructor.status];
+    if (!decision) {
+      return respond(res, 400, { message: "Only reviewed instructor accounts can receive a decision email." });
+    }
+
+    try {
+      await notifyInstructorDecision(instructor, decision, req);
+      return respond(res, 200, {
+        instructor,
+        emailSent: true,
+        message: `EmailJS accepted the notification for ${instructor.email}.`,
+      });
+    } catch (error) {
+      console.warn("EmailJS instructor notification retry failed.", error?.message || error);
+      return respond(res, 502, {
+        message: "EmailJS could not send the instructor notification.",
+        emailError: error?.message || "EmailJS error.",
+      });
+    }
+  }
+
   if (action !== "instructors" || path.length !== 4) {
     return respond(res, 404, { message: "Route not found." });
   }
