@@ -47,6 +47,12 @@ export const getCurrentAdmin = () => request("/me").then((response) => response.
 export const clearAdminSession = () => localStorage.removeItem(tokenKey);
 export const hasAdminSession = () => Boolean(localStorage.getItem(tokenKey));
 export const listInstructors = () => request("/instructors");
+export const getNotificationSettings = () => request("/notification-settings");
+export const saveNotificationEmail = (email) =>
+  request("/notification-settings", {
+    method: "PUT",
+    body: JSON.stringify({ email }),
+  });
 export const sendInstructorNotification = (uid) =>
   request(`/instructors/${encodeURIComponent(uid)}/notify`, { method: "POST" });
 export const approveInstructor = (uid) =>

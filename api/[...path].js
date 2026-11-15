@@ -38,6 +38,34 @@ async function sendAdminEmailJs(templateParams) {
   return true;
 }
 
+async function ensureNotificationSettingsSchema(pool) {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS notification_settings (
+      setting_key VARCHAR(64) NOT NULL PRIMARY KEY,
+      setting_value VARCHAR(255) NOT NULL DEFAULT '',
+      updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    ) CHARACTER SET utf8mb4
+  `);
+}
+
+async function getAdminNotificationRecipients(pool) {
+  await ensureNotificationSettingsSchema(pool);
+  const [settings] = await pool.execute(
+    "SELECT setting_value FROM notification_settings WHERE setting_key = 'admin_email'",
+  );
+  const configuredEmail = String(settings[0]?.setting_value || "").trim().toLowerCase();
+  if (emailPattern.test(configuredEmail) && !configuredEmail.endsWith(".local")) {
+    return [configuredEmail];
+  }
+
+  const [admins] = await pool.execute(
+    "SELECT email FROM admins WHERE role = 'admin' AND email <> ''",
+  );
+  return [...new Set(admins
+    .map((admin) => String(admin.email || "").trim().toLowerCase())
+    .filter((email) => emailPattern.test(email) && !email.endsWith(".local")))];
+}
+
 async function notifyInstructorDecision(instructor, decision) {
   if (!instructor?.email?.trim()) return false;
   const approved = decision === "approved";
@@ -89,10 +117,8 @@ async function notifyInstructorUpdate(instructor, changedFields, password = "") 
 
 async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
   try {
-    const [admins] = await pool.execute(
-      "SELECT email FROM admins WHERE role = 'admin' AND email <> ''",
-    );
-    if (!admins.length) {
+    const recipients = await getAdminNotificationRecipients(pool);
+    if (!recipients.length) {
       console.warn("EmailJS instructor request notice skipped: no administrator email addresses are configured.");
       return false;
     }
@@ -100,12 +126,12 @@ async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
     const requestedBlocks = blocks
       .map((block) => `${block.course} Year ${block.yearLevel}, Block ${block.block}`)
       .join(", ") || "None selected";
-    const results = await Promise.all(admins.map(async (admin) => {
+    const results = await Promise.all(recipients.map(async (recipient) => {
       try {
         await sendAdminEmailJs({
-          to_email: admin.email,
-          recipient_email: admin.email,
-          email: admin.email,
+          to_email: recipient,
+          recipient_email: recipient,
+          email: recipient,
           to_name: "Administrator",
           instructor_name: instructor.name,
           instructor_email: instructor.email,
@@ -272,6 +298,52 @@ async function handleAdmin(req, res, path, pool) {
     return respond(res, 200, { admin: auth.admin });
   }
 
+  if (action === "notification-settings" && path.length === 2) {
+    await ensureNotificationSettingsSchema(pool);
+    if (req.method === "GET") {
+      const recipients = await getAdminNotificationRecipients(pool);
+      const [settings] = await pool.execute(
+        "SELECT setting_value FROM notification_settings WHERE setting_key = 'admin_email'",
+      );
+      const [requests] = await pool.execute(
+        `SELECT uid, name, email, assigned_blocks, created_at
+         FROM instructors WHERE status = 'pending'
+         ORDER BY created_at DESC LIMIT 10`,
+      );
+      const [[pending]] = await pool.execute(
+        "SELECT COUNT(*) AS total FROM instructors WHERE status = 'pending'",
+      );
+      const savedEmail = String(settings[0]?.setting_value || "").trim().toLowerCase();
+      const recipientEmail = emailPattern.test(savedEmail) && !savedEmail.endsWith(".local")
+        ? savedEmail
+        : recipients[0] || "";
+      return respond(res, 200, {
+        recipientEmail,
+        pendingCount: Number(pending.total) || 0,
+        pendingRequests: requests,
+      });
+    }
+    if (req.method === "PUT") {
+      const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
+      if (email && (!emailPattern.test(email) || email.endsWith(".local"))) {
+        return respond(res, 400, { message: "Enter a valid deliverable email address." });
+      }
+      await pool.execute(
+        `INSERT INTO notification_settings (setting_key, setting_value)
+         VALUES ('admin_email', ?)
+         ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)`,
+        [email],
+      );
+      return respond(res, 200, {
+        recipientEmail: email,
+        message: email
+          ? "Admin notification email saved. New instructor requests will be emailed automatically."
+          : "Admin notification email cleared.",
+      });
+    }
+    return respond(res, 405, { message: "Method not allowed." });
+  }
+
   if (action === "instructors" && path.length === 2 && req.method === "GET") {
     const [rows] = await pool.execute(
       `SELECT uid, instructor_id, name, email, status, assigned_blocks, rejection_reason, created_at
@@ -324,7 +396,7 @@ async function handleAdmin(req, res, path, pool) {
       return respond(res, 200, {
         instructor,
         emailSent: true,
-        message: `EmailJS accepted the notification for ${instructor.email}; inbox delivery is not confirmed.`,
+        message: `EmailJS accepted the notification request for ${instructor.email}.`,
       });
     } catch (error) {
       console.warn("EmailJS instructor notification retry failed.", error?.message || error);
@@ -507,10 +579,8 @@ async function handleInstructorAuth(req, res, action, pool) {
     );
     return respond(res, 201, {
       instructor: { id: uid, uid, name, email, status: "pending" },
-      message: notificationSent
-        ? "Request submitted — an administrator has been notified. You'll be notified once your request is reviewed."
-        : "Request submitted, but we couldn't email the administrators. Your request is saved and visible in the admin console.",
       notificationSent,
+      message: "Request submitted. An administrator will review it in LewisSee.",
     });
   }
 

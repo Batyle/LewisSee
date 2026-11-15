@@ -993,6 +993,81 @@ a.back {
   line-height: 1.55;
 }
 
+.notification-settings,
+.notification-requests {
+  margin-top: 16px;
+}
+
+.notification-settings-form {
+  display: grid;
+  gap: 8px;
+  max-width: 720px;
+  color: var(--text);
+}
+
+.notification-settings-form > label {
+  font-weight: 700;
+}
+
+.notification-settings-row {
+  display: flex;
+  gap: 10px;
+}
+
+.notification-settings-row input {
+  flex: 1;
+  min-width: 0;
+  padding: 9px 11px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.notification-settings-form p {
+  margin: 2px 0 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.notification-requests .admin-section-head {
+  align-items: center;
+}
+
+.notification-request-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.notification-request-list li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 12px 0;
+  border-top: 1px solid var(--line);
+}
+
+.notification-request-list li div {
+  display: grid;
+  gap: 3px;
+}
+
+.notification-request-list strong {
+  color: var(--text);
+}
+
+.notification-request-list span,
+.notification-request-list time,
+.notification-no-requests {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
 .admin-section {
   margin-top: 16px;
 }

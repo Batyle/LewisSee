@@ -114,11 +114,11 @@ export default function Instructors() {
       let actionNotice = result.message || "Instructor updated.";
       if (emailDecision && result.instructor?.email) {
         if (result.emailSent) {
-          actionNotice += ` EmailJS accepted the notification for ${result.instructor.email}; inbox delivery is not confirmed.`;
+          actionNotice += ` EmailJS accepted the notification request for ${result.instructor.email}.`;
         } else {
           try {
             await sendInstructorDecisionEmail(result.instructor, emailDecision);
-            actionNotice += ` EmailJS accepted the notification for ${result.instructor.email}; inbox delivery is not confirmed.`;
+            actionNotice += ` EmailJS accepted the notification request for ${result.instructor.email}.`;
           } catch (cause) {
             const emailError = getEmailFailure(result.emailError, cause);
             actionNotice += ` The account was updated, but the email could not be sent: ${emailError}`;
@@ -182,11 +182,11 @@ export default function Instructors() {
       let actionNotice = result.message || "Instructor details updated.";
       if (changedFields.length && result.instructor?.email) {
         if (result.emailSent) {
-          actionNotice += ` EmailJS accepted the notification for ${result.instructor.email}; inbox delivery is not confirmed.`;
+          actionNotice += ` EmailJS accepted the notification request for ${result.instructor.email}.`;
         } else {
           try {
             await sendInstructorUpdateEmail(result.instructor, changedFields, editForm.newPassword);
-            actionNotice += ` EmailJS accepted the notification for ${result.instructor.email}; inbox delivery is not confirmed.`;
+            actionNotice += ` EmailJS accepted the notification request for ${result.instructor.email}.`;
           } catch (cause) {
             actionNotice += ` The account was updated, but the email could not be sent: ${getEmailFailure(result.emailError, cause)}`;
           }
