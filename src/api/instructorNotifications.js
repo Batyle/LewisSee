@@ -1,10 +1,10 @@
 import emailjs from "@emailjs/browser";
 import { sendWithRetry } from "./emailRetry.js";
-
-// Authoritative admin → instructor EmailJS credentials (do not let stale Vercel env override these).
-export const ADMIN_EMAILJS_SERVICE_ID = "service_42lrlwk";
-export const ADMIN_EMAILJS_TEMPLATE_ID = "template_cgf0ftr";
-const ADMIN_EMAILJS_PUBLIC_KEY = "_OxeAtIVSYaPNqVhG";
+import {
+  ADMIN_EMAILJS_PUBLIC_KEY,
+  ADMIN_EMAILJS_SERVICE_ID,
+  ADMIN_EMAILJS_TEMPLATE_ID,
+} from "./instructorEmailConfig.js";
 
 function buildDecisionParams(instructor, decision, password = "") {
   const approved = decision === "approved";

@@ -5,13 +5,15 @@ import { listBlocks } from "./_lib/blocks.js";
 import { getDatabaseErrorMessage } from "./_lib/databaseErrorMessage.js";
 import { getPool } from "./_lib/database.js";
 import { sendWithRetry } from "../src/api/emailRetry.js";
+import {
+  ADMIN_EMAILJS_PUBLIC_KEY,
+  ADMIN_EMAILJS_SERVICE_ID,
+  ADMIN_EMAILJS_TEMPLATE_ID,
+} from "../src/api/instructorEmailConfig.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const respond = (res, code, body) => res.status(code).json(body);
 
-const ADMIN_EMAILJS_SERVICE_ID = "service_42lrlwk";
-const ADMIN_EMAILJS_TEMPLATE_ID = "template_cgf0ftr";
-const ADMIN_EMAILJS_PUBLIC_KEY = "_OxeAtIVSYaPNqVhG";
 const LIVE_SITE_ORIGIN = "https://lewis-see.vercel.app";
 
 function resolveEmailJsOrigin(req) {
