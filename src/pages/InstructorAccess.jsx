@@ -359,9 +359,9 @@ export default function InstructorAccess() {
           {!busy && <SubmitArrow />}
         </button>
 
-        {import.meta.env.DEV && mode === "login" && (
+        {mode === "login" && (
           <p className="access-note">
-            Development test accounts (after seeding the test database): admin / admin123 · employee / employee123
+            Test accounts (after seeding the test database): admin / admin123 · employee / employee123
           </p>
         )}
       </form>
