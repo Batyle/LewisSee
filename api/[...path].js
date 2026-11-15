@@ -67,7 +67,9 @@ async function getAdminNotificationRecipients(pool) {
 }
 
 async function notifyInstructorDecision(instructor, decision) {
-  if (!instructor?.email?.trim()) return false;
+  if (!instructor?.email?.trim()) {
+    throw new Error("The instructor account has no email address.");
+  }
   const approved = decision === "approved";
   const suspended = decision === "suspended";
   const recipient = instructor.email.trim();
@@ -91,7 +93,7 @@ async function notifyInstructorDecision(instructor, decision) {
     message,
     reason: instructor.rejectionReason || "",
   });
-  return true;
+  return recipient;
 }
 
 async function notifyInstructorUpdate(instructor, changedFields, password = "") {
@@ -392,11 +394,12 @@ async function handleAdmin(req, res, path, pool) {
     }
 
     try {
-      await notifyInstructorDecision(instructor, decision);
+      const emailRecipient = await notifyInstructorDecision(instructor, decision);
       return respond(res, 200, {
         instructor,
         emailSent: true,
-        message: `EmailJS accepted the notification request for ${instructor.email}.`,
+        emailRecipient,
+        message: `EmailJS accepted the notification request addressed to ${emailRecipient}.`,
       });
     } catch (error) {
       console.warn("EmailJS instructor notification retry failed.", error?.message || error);
@@ -521,14 +524,22 @@ async function handleAdmin(req, res, path, pool) {
   const updatedInstructor = serializeInstructor(updatedRows[0]);
   const emailDecision = decision === "approve" ? "approved" : decision === "reject" ? "rejected" : "suspended";
   let emailSent = false;
+  let emailRecipient = "";
   let emailError = "";
   try {
-    emailSent = await notifyInstructorDecision(updatedInstructor, emailDecision);
+    emailRecipient = await notifyInstructorDecision(updatedInstructor, emailDecision);
+    emailSent = true;
   } catch (error) {
     emailError = error?.message || "EmailJS error.";
     console.warn("EmailJS instructor decision notice failed.", emailError);
   }
-  return respond(res, 200, { instructor: updatedInstructor, message, emailSent, emailError });
+  return respond(res, 200, {
+    instructor: updatedInstructor,
+    message,
+    emailSent,
+    emailRecipient,
+    emailError,
+  });
 }
 
 async function handleInstructorAuth(req, res, action, pool) {

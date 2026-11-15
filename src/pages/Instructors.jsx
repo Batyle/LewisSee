@@ -113,12 +113,13 @@ export default function Instructors() {
       const result = await action();
       let actionNotice = result.message || "Instructor updated.";
       if (emailDecision && result.instructor?.email) {
+        const recipient = result.emailRecipient || result.instructor.email;
         if (result.emailSent) {
-          actionNotice += ` EmailJS accepted the notification request for ${result.instructor.email}.`;
+          actionNotice += ` EmailJS accepted the notification request addressed to ${recipient}.`;
         } else {
           try {
             await sendInstructorDecisionEmail(result.instructor, emailDecision);
-            actionNotice += ` EmailJS accepted the notification request for ${result.instructor.email}.`;
+            actionNotice += ` EmailJS accepted the notification request addressed to ${result.instructor.email}.`;
           } catch (cause) {
             const emailError = getEmailFailure(result.emailError, cause);
             actionNotice += ` The account was updated, but the email could not be sent: ${emailError}`;
@@ -147,7 +148,9 @@ export default function Instructors() {
     setNotice("");
     try {
       const result = await sendInstructorNotification(person.uid);
-      setNotice(result.message);
+      setNotice(result.emailRecipient
+        ? `${result.message} Intended recipient: ${result.emailRecipient}. If it arrives elsewhere, correct the EmailJS template's To Email setting to {{to_email}}.`
+        : result.message);
     } catch (cause) {
       setError(cause.message || "EmailJS could not send the instructor notification.");
     } finally {
