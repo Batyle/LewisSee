@@ -39,6 +39,30 @@ function SubmitArrow() {
   );
 }
 
+function PasswordVisibilityButton({ visible, onClick, fieldName }) {
+  return (
+    <button
+      type="button"
+      className="access-password-toggle"
+      aria-label={`${visible ? "Hide" : "Show"} ${fieldName}`}
+      aria-pressed={visible}
+      onClick={onClick}
+    >
+      {visible ? (
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 3l18 18M10.6 10.6a2 2 0 0 0 2.8 2.8" />
+          <path d="M9.9 5.2A10.7 10.7 0 0 1 12 5c5.4 0 9 5 9 7a8.6 8.6 0 0 1-2.2 3.2M6.2 6.2C3.9 7.7 3 10.2 3 12c0 2 3.6 7 9 7 1.1 0 2.2-.2 3.1-.6" />
+        </svg>
+      ) : (
+        <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M3 12s3.2-7 9-7 9 7 9 7-3.2 7-9 7-9-7-9-7Z" />
+          <circle cx="12" cy="12" r="2.5" />
+        </svg>
+      )}
+    </button>
+  );
+}
+
 function clearInstructorSession() {
   localStorage.removeItem("instructor-token");
   localStorage.removeItem("instructor-account");
@@ -74,6 +98,8 @@ export default function InstructorAccess() {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
 
   useEffect(() => {
     if (mode !== "register") return;
@@ -122,6 +148,8 @@ export default function InstructorAccess() {
     setBlocks([]);
     setBlocksLoading(true);
     setBlocksError("");
+    setShowPassword(false);
+    setShowConfirmPassword(false);
     setMode("register");
   };
 
@@ -159,6 +187,8 @@ export default function InstructorAccess() {
         if (!response.ok) throw new Error(apiErrorMessage(data, "Unable to submit your request."));
         setMessage(data.message || "Request submitted — you'll be notified once an admin reviews it.");
         setForm(initialForm);
+        setShowPassword(false);
+        setShowConfirmPassword(false);
         return;
       }
 
@@ -290,11 +320,11 @@ export default function InstructorAccess() {
 
         <label>
           Password
-          <span className="access-input-wrap">
+          <span className={`access-input-wrap${mode === "register" ? " access-password-field" : ""}`}>
             <AccessFieldIcon type="lock" />
             <input
               className="field"
-              type="password"
+              type={mode === "register" && showPassword ? "text" : "password"}
               name="password"
               minLength={mode === "register" ? 8 : undefined}
               value={form.password}
@@ -303,6 +333,13 @@ export default function InstructorAccess() {
               required
               autoComplete={mode === "register" ? "new-password" : "current-password"}
             />
+            {mode === "register" && (
+              <PasswordVisibilityButton
+                visible={showPassword}
+                onClick={() => setShowPassword((visible) => !visible)}
+                fieldName="password"
+              />
+            )}
           </span>
         </label>
 
@@ -310,15 +347,24 @@ export default function InstructorAccess() {
           <>
             <label>
               Confirm password
-              <input
-                className="field"
-                type="password"
-                name="confirmPassword"
-                minLength="8"
-                value={form.confirmPassword}
-                onChange={update}
-                required
-              />
+              <span className="access-input-wrap access-password-field">
+                <AccessFieldIcon type="lock" />
+                <input
+                  className="field"
+                  type={showConfirmPassword ? "text" : "password"}
+                  name="confirmPassword"
+                  minLength="8"
+                  value={form.confirmPassword}
+                  onChange={update}
+                  required
+                  autoComplete="new-password"
+                />
+                <PasswordVisibilityButton
+                  visible={showConfirmPassword}
+                  onClick={() => setShowConfirmPassword((visible) => !visible)}
+                  fieldName="confirmation password"
+                />
+              </span>
             </label>
             <label>
               Courses and requested blocks

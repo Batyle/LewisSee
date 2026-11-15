@@ -5,14 +5,17 @@ import { listBlocks } from "./_lib/blocks.js";
 import { getDatabaseErrorMessage } from "./_lib/databaseErrorMessage.js";
 import { getPool } from "./_lib/database.js";
 import { sendWithRetry } from "../src/api/emailRetry.js";
-import { ADMIN_INSTRUCTOR_EMAILJS } from "../src/api/emailConfig.js";
+import {
+  ADMIN_INSTRUCTOR_EMAILJS,
+  INSTRUCTOR_REQUEST_EMAILJS,
+} from "../src/api/emailConfig.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const respond = (res, code, body) => res.status(code).json(body);
 
 const LIVE_SITE_ORIGIN = "https://lewis-see.vercel.app";
 
-async function sendAdminEmailJs(templateParams) {
+async function sendEmailJs(credentials, templateParams) {
   await sendWithRetry(async () => {
     const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
       method: "POST",
@@ -21,9 +24,9 @@ async function sendAdminEmailJs(templateParams) {
         Origin: LIVE_SITE_ORIGIN,
       },
       body: JSON.stringify({
-        service_id: ADMIN_INSTRUCTOR_EMAILJS.serviceId,
-        template_id: ADMIN_INSTRUCTOR_EMAILJS.templateId,
-        user_id: ADMIN_INSTRUCTOR_EMAILJS.publicKey,
+        service_id: credentials.serviceId,
+        template_id: credentials.templateId,
+        user_id: credentials.publicKey,
         template_params: templateParams,
       }),
     });
@@ -80,7 +83,7 @@ async function notifyInstructorDecision(instructor, decision) {
       ? "Your LewisSee instructor access was suspended. Contact an administrator if you believe this is a mistake."
       : "Your LewisSee instructor access request was not approved. Contact an administrator if you have questions.";
 
-  await sendAdminEmailJs({
+  await sendEmailJs(ADMIN_INSTRUCTOR_EMAILJS, {
     to_email: recipient,
     recipient_email: recipient,
     instructor_email: recipient,
@@ -107,7 +110,7 @@ async function notifyInstructorUpdate(instructor, changedFields) {
   if (!instructor?.email?.trim() || !changedFields?.length) return false;
   const recipient = instructor.email.trim();
   const configuredReplyTo = process.env.ADMIN_NOTIFICATION_REPLY_TO?.trim();
-  await sendAdminEmailJs({
+  await sendEmailJs(ADMIN_INSTRUCTOR_EMAILJS, {
     to_email: recipient,
     recipient_email: recipient,
     instructor_email: recipient,
@@ -140,18 +143,19 @@ async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
       .join(", ") || "None selected";
     const results = await Promise.all(recipients.map(async (recipient) => {
       try {
-        await sendAdminEmailJs({
+        await sendEmailJs(INSTRUCTOR_REQUEST_EMAILJS, {
           to_email: recipient,
           recipient_email: recipient,
           email: recipient,
           to_name: "Administrator",
+          subject: `New LewisSee instructor access request from ${instructor.name}`,
           instructor_name: instructor.name,
           instructor_email: instructor.email,
           decision: "pending",
           status: "pending",
           instructor_id: "",
           requested_blocks: requestedBlocks,
-          reply_to: instructor.email,
+          submitted_at: new Date().toISOString(),
           message: `${instructor.name} (${instructor.email}) submitted a new instructor access request. Requested blocks: ${requestedBlocks}. Review it in the LewisSee admin console.`,
         });
         return true;
@@ -601,7 +605,9 @@ async function handleInstructorAuth(req, res, action, pool) {
     return respond(res, 201, {
       instructor: { id: uid, uid, name, email, status: "pending" },
       notificationSent,
-      message: "Request submitted. An administrator will review it in LewisSee.",
+      message: notificationSent
+        ? "Request submitted. The LewisSee administrators have been notified."
+        : "Request saved, but the admin email alert could not be sent. Your request is visible in the LewisSee admin console.",
     });
   }
 
