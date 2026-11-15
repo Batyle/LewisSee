@@ -361,7 +361,7 @@ export default function InstructorAccess() {
 
         {mode === "login" && (
           <p className="access-note">
-            Test accounts (after seeding the test database): admin / admin123 · employee / employee123
+            Test accounts: admin / admin123 · employee / employee123
           </p>
         )}
       </form>
