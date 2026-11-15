@@ -31,9 +31,12 @@ const request = async (path, options = {}) => {
 
 export async function signInAdmin(email, password) {
   const normalizedEmail = email.trim();
+  const loginEmail = normalizedEmail.toLowerCase() === "admin"
+    ? "admin@lewissee.local"
+    : normalizedEmail;
   const response = await request("/login", {
     method: "POST",
-    body: JSON.stringify({ email: normalizedEmail, password }),
+    body: JSON.stringify({ email: loginEmail, password }),
   });
   localStorage.setItem(tokenKey, response.token);
   return response.admin;
