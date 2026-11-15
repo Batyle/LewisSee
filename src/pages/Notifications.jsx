@@ -106,8 +106,9 @@ export default function Notifications() {
             </button>
           </div>
           <p>
-            EmailJS accepts the send request, but inbox delivery depends on its connected sender
-            and the template recipient being set to <code>{"{{to_email}}"}</code>.
+            EmailJS sends from its connected sender. Verify that sender domain, set the template
+            recipient to <code>{"{{to_email}}"}</code>, and remove the password section from the
+            template; LewisSee never emails passwords.
           </p>
         </form>
         {error && <p className="alert error-alert" role="alert">{error}</p>}

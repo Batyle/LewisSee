@@ -188,7 +188,7 @@ export default function Instructors() {
           actionNotice += ` EmailJS accepted the notification request for ${result.instructor.email}.`;
         } else {
           try {
-            await sendInstructorUpdateEmail(result.instructor, changedFields, editForm.newPassword);
+            await sendInstructorUpdateEmail(result.instructor, changedFields);
             actionNotice += ` EmailJS accepted the notification request for ${result.instructor.email}.`;
           } catch (cause) {
             actionNotice += ` The account was updated, but the email could not be sent: ${getEmailFailure(result.emailError, cause)}`;
@@ -437,7 +437,7 @@ export default function Instructors() {
                 onChange={(event) => setEditForm({ ...editForm, newPassword: event.target.value })}
               />
             </label>
-            <small className="admin-instructor-edit-note">If you set a new password, it will be included in the notification email along with the instructor name and ID.</small>
+            <small className="admin-instructor-edit-note">For security, passwords are never included in notification emails.</small>
             <div className="admin-person-actions">
               <button type="button" className="admin-refresh" disabled={Boolean(busyUid)} onClick={() => setEditingInstructor(null)}>Cancel</button>
               <button type="submit" className="admin-action-approve" disabled={Boolean(busyUid)}>

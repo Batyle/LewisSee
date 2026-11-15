@@ -73,46 +73,56 @@ async function notifyInstructorDecision(instructor, decision) {
   const approved = decision === "approved";
   const suspended = decision === "suspended";
   const recipient = instructor.email.trim();
+  const configuredReplyTo = process.env.ADMIN_NOTIFICATION_REPLY_TO?.trim();
   const message = approved
-    ? `Your instructor access request has been approved. Your instructor ID is ${instructor.instructorId || "being assigned"}. Sign in using ${recipient} at LewisSee.`
+    ? `Your LewisSee instructor access request was approved. Sign in at https://lewis-see.vercel.app using ${recipient}. Your instructor ID is ${instructor.instructorId || "being assigned"}.`
     : suspended
-      ? "Your LewisSee instructor account has been suspended. Please contact an administrator for assistance."
-      : "Your instructor access request has been denied.";
+      ? "Your LewisSee instructor access was suspended. Contact an administrator if you believe this is a mistake."
+      : "Your LewisSee instructor access request was not approved. Contact an administrator if you have questions.";
 
   await sendAdminEmailJs({
     to_email: recipient,
     recipient_email: recipient,
+    instructor_email: recipient,
     email: recipient,
     to_name: instructor.name,
-    reply_to: recipient,
+    subject: approved
+      ? "LewisSee instructor access approved"
+      : suspended
+        ? "LewisSee instructor access update"
+        : "LewisSee instructor access request update",
+    ...(configuredReplyTo ? { reply_to: configuredReplyTo } : {}),
     instructor_name: instructor.name,
     decision,
     status: approved ? "active" : suspended ? "suspended" : "rejected",
     instructor_id: instructor.instructorId || "",
-    password: approved ? "Use the password you set during registration" : "",
+    password: "",
     message,
     reason: instructor.rejectionReason || "",
   });
   return recipient;
 }
 
-async function notifyInstructorUpdate(instructor, changedFields, password = "") {
+async function notifyInstructorUpdate(instructor, changedFields) {
   if (!instructor?.email?.trim() || !changedFields?.length) return false;
   const recipient = instructor.email.trim();
+  const configuredReplyTo = process.env.ADMIN_NOTIFICATION_REPLY_TO?.trim();
   await sendAdminEmailJs({
     to_email: recipient,
     recipient_email: recipient,
+    instructor_email: recipient,
     email: recipient,
     to_name: instructor.name,
-    reply_to: recipient,
+    subject: "LewisSee instructor account update",
+    ...(configuredReplyTo ? { reply_to: configuredReplyTo } : {}),
     instructor_name: instructor.name,
     instructor_id: instructor.instructorId || "",
-    password: password || "Unchanged — use your existing password",
+    password: "",
     decision: "updated",
     status: instructor.status,
     reason: "",
     changed_fields: changedFields.join(", "),
-    message: `An administrator updated your instructor account: ${changedFields.join(", ")}. Contact your administrator if you did not expect this change.`,
+    message: `An administrator updated your LewisSee instructor account (${changedFields.join(", ")}). If you did not expect this change, contact a LewisSee administrator.`,
   });
   return true;
 }
@@ -470,7 +480,7 @@ async function handleAdmin(req, res, path, pool) {
     let emailError = "";
     if (changedFields.length) {
       try {
-        emailSent = await notifyInstructorUpdate(updatedInstructor, changedFields, newPassword);
+        emailSent = await notifyInstructorUpdate(updatedInstructor, changedFields);
       } catch (error) {
         emailError = error?.message || "EmailJS error.";
         console.warn("EmailJS instructor update notice failed.", emailError);
