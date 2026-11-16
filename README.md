@@ -54,7 +54,7 @@ The interface responds to user and browser events to keep attendance workflows i
 - **Biometric privacy:** Student reference photos and face descriptors are sensitive data. Limit access to authorized staff and protect the database and API credentials.
 - **Attendance email photos and status:** EmailJS sends a photo and Present/Late status only for recognized, live-verified scans during today's scheduled window. Students who do not scan are not automatically marked absent or emailed. Obtain consent before enabling photo attachments and follow the institution's image-retention policy.
 
-## 👥 Members
+##  Members
 
 LewisSee was developed by Group 7 for The Lewis College. The team members contributed in the following areas:
 
