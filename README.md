@@ -1,14 +1,14 @@
-# 👁️ LewisSee: Web-Based Attendance System
+# LewisSee: Web-Based Attendance System
 
 > A secure, event-driven facial-recognition attendance system with liveness checks and automated email notifications for The Lewis College.
 
-## 📖 Overview
+## Overview
 
 LewisSee is a web-based attendance platform for instructors and administrators at The Lewis College. Instead of relying on paper roll calls or sign-in sheets, instructors can enroll students, select a class and date, and record attendance after a student's enrolled face is recognized and the camera image passes a liveness check.
 
 Each check-in is saved with its Philippine Standard Time and can be classified as **Present**, **Late**, or **Absent** using the session's time-in and optional late time ranges. Attendance records and session rules are stored in MySQL so instructors and administrators can review and manage them across devices. When EmailJS is configured and a student has an email address on file, LewisSee can send that student a check-in notification.
 
-## ✨ Main Features
+##  Main Features
 
 - **Facial attendance:** Recognizes enrolled students in the classroom workspace and records a check-in once per student, class, and date.
 - **Liveness detection:** A Python service checks the camera frame for signs of a live face before a scan is recorded. This helps deter still-photo attempts but is not a guarantee against every spoofing method.
@@ -19,7 +19,7 @@ Each check-in is saved with its Philippine Standard Time and can be classified a
 - **Email notifications:** EmailJS can send check-in notifications to students with an email address on file, notify administrators when an instructor access request is submitted, and send instructors administrator decisions and account updates.
 - **Responsive interface:** The attendance and administration workflows adapt to mobile and desktop screens.
 
-## 🛠️ Tech Stack
+##  Tech Stack
 
 | Area | Technology |
 | --- | --- |
@@ -30,7 +30,7 @@ Each check-in is saved with its Philippine Standard Time and can be classified a
 | Email | EmailJS |
 | Source control and CI | GitHub and GitHub Actions |
 
-## 🖱️ Event-Driven Architecture
+##  Event-Driven Architecture
 
 The interface responds to user and browser events to keep attendance workflows interactive. Examples include:
 
@@ -42,7 +42,7 @@ The interface responds to user and browser events to keep attendance workflows i
 - **Timer and page lifecycle events** for elapsed-time displays, scanner frame scheduling, camera cleanup, and pausing the scanner when the page is hidden.
 - **Network events** for responding to browser connectivity changes.
 
-## ⚠️ System Requirements and Limitations
+## System Requirements and Limitations
 
 - **Internet access:** The app relies on hosted database and API services for shared attendance data. The liveness service must be running locally for local scanning or deployed to an HTTPS endpoint for public deployments.
 - **Camera permission and secure context:** The instructor must allow camera access from the browser before scanning starts. Camera access generally requires HTTPS, except on localhost.
@@ -51,7 +51,7 @@ The interface responds to user and browser events to keep attendance workflows i
 - **Biometric privacy:** Student reference photos and face descriptors are sensitive data. Limit access to authorized staff and protect the database and API credentials.
 - **Attendance email photos and status:** EmailJS sends a photo and Present/Late status only for recognized, live-verified scans during today's scheduled window. Students who do not scan are not automatically marked absent or emailed. Obtain consent before enabling photo attachments and follow the institution's image-retention policy.
 
-## 👥 About the Creators
+##  About the Creators
 
 LewisSee was developed by Group 7 for The Lewis College. The team members contributed in the following areas:
 
@@ -78,7 +78,7 @@ LewisSee was developed by Group 7 for The Lewis College. The team members contri
   </tr>
 </table>
 
-## 📚 References
+## References
 
 - Alhanaee, K., Alhammadi, M., Almenhali, M., & Shatnawi, M. (2021). Face recognition smart attendance system using deep transfer learning. *Procedia Computer Science, 192*, 4093–4102. https://doi.org/10.1016/j.procs.2021.09.185
 - Aiven. (n.d.). *Managed MySQL*. Aiven. https://aiven.io/mysql
