@@ -45,14 +45,18 @@ The interface responds to user and browser events to keep attendance workflows i
 - **Timer and page lifecycle events** for elapsed-time displays, scanner frame scheduling, camera cleanup, and pausing the scanner when the page is hidden.
 - **Network events** for responding to browser connectivity changes.
 
-## System Requirements and Limitations
+## System Requirements
 
 - **Internet access:** The app relies on hosted database and API services for shared attendance data. The liveness service must be running locally for local scanning or deployed to an HTTPS endpoint for public deployments.
 - **Camera permission and secure context:** The instructor must allow camera access from the browser before scanning starts. Camera access generally requires HTTPS, except on localhost.
-- **Camera and lighting:** Face recognition works best with a usable camera, adequate lighting, and a clear view of the student's face.
-- **Liveness limitations:** Anti-spoofing reduces the risk of a still-image check-in but cannot guarantee detection of every advanced replay or deepfake.
+
+## Limitations
+
+> **Important:** Recognition depends on camera quality, lighting, and a clear view of the student's face. Liveness checks help deter spoofing but cannot guarantee detection of every still image, replay, or deepfake.
+
+- **Attendance:** Students who do not scan are not automatically marked absent; staff must review attendance and apply the appropriate status.
+- **Email notifications:** EmailJS must be configured and student email addresses must be available. Check-in notifications are sent only for recognized, live-verified scans during today's scheduled window. Obtain consent before enabling photo attachments and follow the institution's image-retention policy.
 - **Biometric privacy:** Student reference photos and face descriptors are sensitive data. Limit access to authorized staff and protect the database and API credentials.
-- **Attendance email photos and status:** EmailJS sends a photo and Present/Late status only for recognized, live-verified scans during today's scheduled window. Students who do not scan are not automatically marked absent or emailed. Obtain consent before enabling photo attachments and follow the institution's image-retention policy.
 
 ##  Members
 
