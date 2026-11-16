@@ -320,11 +320,11 @@ export default function InstructorAccess() {
 
         <label>
           Password
-          <span className={`access-input-wrap${mode === "register" ? " access-password-field" : ""}`}>
+          <span className="access-input-wrap access-password-field">
             <AccessFieldIcon type="lock" />
             <input
               className="field"
-              type={mode === "register" && showPassword ? "text" : "password"}
+              type={showPassword ? "text" : "password"}
               name="password"
               minLength={mode === "register" ? 8 : undefined}
               value={form.password}
@@ -333,13 +333,11 @@ export default function InstructorAccess() {
               required
               autoComplete={mode === "register" ? "new-password" : "current-password"}
             />
-            {mode === "register" && (
-              <PasswordVisibilityButton
-                visible={showPassword}
-                onClick={() => setShowPassword((visible) => !visible)}
-                fieldName="password"
-              />
-            )}
+            <PasswordVisibilityButton
+              visible={showPassword}
+              onClick={() => setShowPassword((visible) => !visible)}
+              fieldName="password"
+            />
           </span>
         </label>
 
@@ -405,11 +403,6 @@ export default function InstructorAccess() {
           {!busy && <SubmitArrow />}
         </button>
 
-        {mode === "login" && (
-          <p className="access-note">
-            Test accounts: admin / admin123 · employee / employee123
-          </p>
-        )}
       </form>
       <p className="access-switch">
         {mode === "login" ? "Need instructor access?" : "Already have an account?"}

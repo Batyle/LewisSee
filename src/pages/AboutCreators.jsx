@@ -11,6 +11,7 @@ const creators = [
     name: "Austin Dominic Valladolid",
     role: "Data Analysis and Database Integration",
     image: austinPhoto,
+    facebookUrl: "https://www.facebook.com/thebabyfacedassassinadjv30",
     description:
       "Works with attendance data and the MySQL database to support reliable data storage and retrieval.",
   },
@@ -18,6 +19,7 @@ const creators = [
     name: "Luige Dela Torre",
     role: "Frontend/Backend Integration",
     image: luigePhoto,
+    facebookUrl: "https://www.facebook.com/luige.delatorre.5/",
     description:
       "Connects the React frontend with backend services and helps bring the system's attendance workflows together.",
   },
@@ -25,6 +27,7 @@ const creators = [
     name: "Je An Fombuena",
     role: "Frontend System Designer, UI, and Documentation",
     image: jeAnPhoto,
+    facebookUrl: "https://www.facebook.com/profile.php?id=61579854658700",
     description:
       "Contributes to the interface design and user experience, and documents the system and its workflows.",
   },
@@ -36,10 +39,6 @@ function FacebookIcon() {
       <path d="M13.5 21v-8.2h2.8l.4-3.2h-3.2V7.5c0-.9.3-1.6 1.6-1.6h1.7V3.1c-.3 0-1.3-.1-2.5-.1-2.5 0-4.2 1.5-4.2 4.3v2.3H7.3v3.2h2.8V21h3.4Z" />
     </svg>
   );
-}
-
-function facebookSearchUrl(name) {
-  return `https://www.facebook.com/search/top/?q=${encodeURIComponent(name)}`;
 }
 
 export default function AboutCreators() {
@@ -90,13 +89,13 @@ export default function AboutCreators() {
                 <p className="creator-card-description">{creator.description}</p>
                 <a
                   className="creator-facebook-link"
-                  href={facebookSearchUrl(creator.name)}
+                  href={creator.facebookUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  aria-label={`Search Facebook for ${creator.name}`}
+                  aria-label={`Visit ${creator.name}'s Facebook profile`}
                 >
                   <FacebookIcon />
-                  Find on Facebook
+                  Facebook profile
                   <span aria-hidden="true">↗</span>
                 </a>
               </div>
