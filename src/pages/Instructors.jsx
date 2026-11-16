@@ -435,6 +435,8 @@ export default function Instructors() {
               <input
                 required
                 maxLength={255}
+                pattern="[^0-9]+"
+                title="Names cannot contain numbers."
                 value={editForm.name}
                 onChange={(event) => setEditForm({ ...editForm, name: event.target.value })}
               />

@@ -6,13 +6,14 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function register(req, res, next) {
   const { name, email, password, requestedBlockIds } = req.body;
+  const normalizedName = typeof name === 'string' ? name.trim().replace(/\s+/g, ' ') : '';
   const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
   const validBlockIds = Array.isArray(requestedBlockIds)
     && requestedBlockIds.every((id) => Number.isInteger(id) && id > 0);
 
-  if (typeof name !== 'string' || !name.trim() || !emailPattern.test(normalizedEmail)
+  if (!normalizedName || /\d/.test(normalizedName) || !emailPattern.test(normalizedEmail)
     || typeof password !== 'string' || password.length < 8 || !validBlockIds) {
-    return res.status(400).json({ message: 'Please provide a name, valid email, password of at least 8 characters, and valid requested block IDs.' });
+    return res.status(400).json({ message: 'Please provide a name without numbers, a valid email, a password of at least 8 characters, and valid requested block IDs.' });
   }
 
   try {
@@ -20,11 +21,11 @@ export async function register(req, res, next) {
     const [result] = await pool.execute(
       `INSERT INTO instructors (name, email, password_hash, status, email_verified, requested_blocks)
        VALUES (?, ?, ?, 'pending', 0, ?)`,
-      [name.trim(), normalizedEmail, passwordHash, JSON.stringify(requestedBlockIds)],
+      [normalizedName, normalizedEmail, passwordHash, JSON.stringify(requestedBlockIds)],
     );
     // TODO Step 3: send "request received" email
     return res.status(201).json({
-      instructor: { id: result.insertId, name: name.trim(), email: normalizedEmail, status: 'pending' },
+      instructor: { id: result.insertId, name: normalizedName, email: normalizedEmail, status: 'pending' },
     });
   } catch (error) {
     if (error.code === 'ER_DUP_ENTRY') return res.status(409).json({ message: 'An account with this email already exists.' });

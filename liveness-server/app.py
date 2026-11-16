@@ -664,8 +664,8 @@ def update_instructor(
 ) -> dict[str, Any]:
     name = " ".join(payload.name.split())
     instructor_id = payload.instructorId.strip().upper()
-    if not name or not re.fullmatch(r"C-\d{4}-\d{3}", instructor_id):
-        raise HTTPException(status_code=400, detail="Provide a name and instructor ID in C-YYYY-NNN format.")
+    if not name or any(character.isdigit() for character in name) or not re.fullmatch(r"C-\d{4}-\d{3}", instructor_id):
+        raise HTTPException(status_code=400, detail="Provide a name without numbers and an instructor ID in C-YYYY-NNN format.")
     if payload.newPassword and len(payload.newPassword) < 8:
         raise HTTPException(status_code=400, detail="Passwords must contain at least 8 characters.")
 
@@ -783,10 +783,10 @@ def instructor_register(payload: InstructorRegister) -> dict[str, Any]:
     """Create a pending instructor account in the live MySQL database."""
     normalized_email = payload.email.strip().lower()
     name = " ".join(payload.name.split())
-    if not name or not EMAIL_PATTERN.match(normalized_email):
+    if not name or any(character.isdigit() for character in name) or not EMAIL_PATTERN.match(normalized_email):
         raise HTTPException(
             status_code=400,
-            detail="Please provide a name, valid email, password of at least 8 characters, and valid requested block IDs.",
+            detail="Please provide a name without numbers, a valid email, password of at least 8 characters, and valid requested block IDs.",
         )
     if any(block_id < 1 for block_id in payload.requestedBlockIds):
         raise HTTPException(status_code=400, detail="Requested block IDs are invalid.")
@@ -1000,6 +1000,8 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
         student_id = " ".join(student.studentId.split()).casefold()
         student_name = " ".join(student.name.split()).casefold()
         email = student.email.strip().casefold()
+        if any(character.isdigit() for character in student.name):
+            raise HTTPException(status_code=422, detail="Student names cannot contain numbers.")
         if not student_id or not student_name:
             raise HTTPException(status_code=422, detail="Every student needs a name and student ID.")
         if student_id in student_ids:

@@ -158,6 +158,10 @@ export default function InstructorAccess() {
     setError("");
     setMessage("");
 
+    if (mode === "register" && /\d/.test(form.name)) {
+      return setError("Names cannot contain numbers.");
+    }
+
     if (mode === "register" && form.password !== form.confirmPassword) {
       return setError("Passwords do not match.");
     }
@@ -297,7 +301,15 @@ export default function InstructorAccess() {
         {mode === "register" && (
           <label>
             Full name
-            <input className="field" name="name" value={form.name} onChange={update} required />
+            <input
+              className="field"
+              name="name"
+              value={form.name}
+              onChange={update}
+              pattern="[^0-9]+"
+              title="Names cannot contain numbers."
+              required
+            />
           </label>
         )}
 

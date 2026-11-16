@@ -1028,6 +1028,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   };
   const enroll = async (event) => {
     event.preventDefault();
+    if (/\d/.test(form.name)) return setNotice("Names cannot contain numbers.");
     if (!file) return setNotice("Choose a reference portrait.");
     if (!isValidStudentId(form))
       return setNotice("Enter a 4-digit year and a 3-digit student number.");
@@ -1101,6 +1102,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   const saveEdit = async (event) => {
     event.preventDefault();
     if (!students.some((student) => student.studentId === editingId)) return;
+    if (/\d/.test(editForm.name)) return setNotice("Names cannot contain numbers.");
     if (!isValidStudentId(editForm))
       return setNotice("Enter a 4-digit year and a 3-digit student number.");
     setSavingEdit(true);
@@ -1740,6 +1742,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                   Full name
                   <input
                     required
+                    pattern="[^0-9]+"
+                    title="Names cannot contain numbers."
                     autoComplete="name"
                     placeholder="e.g. Alex Santos"
                     value={form.name}
@@ -1871,6 +1875,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                 Full name
                 <input
                   required
+                  pattern="[^0-9]+"
+                  title="Names cannot contain numbers."
                   value={editForm.name}
                   onChange={(e) =>
                     setEditForm({ ...editForm, name: e.target.value })
