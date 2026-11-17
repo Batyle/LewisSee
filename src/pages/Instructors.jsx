@@ -31,6 +31,17 @@ const formatWhen = (value) => {
   return Number.isNaN(date.getTime()) ? String(value) : date.toLocaleString();
 };
 
+const sortInstructors = (people, sortBy) => [...people].sort((a, b) => {
+  if (sortBy.startsWith("name")) {
+    const nameOrder = (a.name || "").localeCompare(b.name || "", undefined, { sensitivity: "base" });
+    return sortBy === "name-desc" ? -nameOrder : nameOrder;
+  }
+  const dateA = new Date(a.createdAt || 0).getTime();
+  const dateB = new Date(b.createdAt || 0).getTime();
+  const dateOrder = (Number.isNaN(dateA) ? 0 : dateA) - (Number.isNaN(dateB) ? 0 : dateB);
+  return sortBy === "date-asc" ? dateOrder : -dateOrder;
+});
+
 const getEmailFailure = (serverError, clientError) => {
   const browserError = clientError?.text
     ? `EmailJS HTTP ${clientError.status}: ${clientError.text}`
@@ -49,6 +60,9 @@ export default function Instructors() {
   const [busyUid, setBusyUid] = useState("");
   const [editingInstructor, setEditingInstructor] = useState(null);
   const [editForm, setEditForm] = useState({ name: "", instructorId: "", newPassword: "" });
+  const [requestSort, setRequestSort] = useState("date-desc");
+  const [rosterStatus, setRosterStatus] = useState("all");
+  const [rosterSort, setRosterSort] = useState("date-desc");
   const loadSequence = useRef(0);
 
   const applyInstructorList = useCallback((data) => {
@@ -111,12 +125,16 @@ export default function Instructors() {
   }, [applyInstructorList, load]);
 
   const pending = useMemo(
-    () => instructors.filter((person) => person.status === "pending"),
-    [instructors],
+    () => sortInstructors(instructors.filter((person) => person.status === "pending"), requestSort),
+    [instructors, requestSort],
   );
   const roster = useMemo(
-    () => instructors.filter((person) => person.status !== "pending"),
-    [instructors],
+    () => sortInstructors(
+      instructors.filter((person) => person.status !== "pending"
+        && (rosterStatus === "all" || person.status === rosterStatus)),
+      rosterSort,
+    ),
+    [instructors, rosterSort, rosterStatus],
   );
 
   const runAction = async (uid, action, emailDecision) => {
@@ -257,19 +275,34 @@ export default function Instructors() {
             <h2>Pending requests</h2>
             <p>New access requests are loaded from the live database.</p>
           </div>
-          <button
-            type="button"
-            className="admin-refresh"
-            onClick={() => {
-              setLoading(true);
-              void load().then((sequence) => {
-                if (sequence === loadSequence.current) setLoading(false);
-              });
-            }}
-            disabled={Boolean(busyUid)}
-          >
-            Refresh
-          </button>
+          <div className="admin-section-controls">
+            <label className="admin-filter-label">
+              Sort requests
+              <select
+                className="admin-filter-select"
+                value={requestSort}
+                onChange={(event) => setRequestSort(event.target.value)}
+              >
+                <option value="date-desc">Newest first</option>
+                <option value="date-asc">Oldest first</option>
+                <option value="name-asc">Name A–Z</option>
+                <option value="name-desc">Name Z–A</option>
+              </select>
+            </label>
+            <button
+              type="button"
+              className="admin-refresh"
+              onClick={() => {
+                setLoading(true);
+                void load().then((sequence) => {
+                  if (sequence === loadSequence.current) setLoading(false);
+                });
+              }}
+              disabled={Boolean(busyUid)}
+            >
+              Refresh
+            </button>
+          </div>
         </div>
 
         {pending.length === 0 ? (
@@ -342,14 +375,42 @@ export default function Instructors() {
         <div className="admin-section-head">
           <div>
             <h2>Instructor roster</h2>
-            <p>Approved and previously reviewed instructor accounts.</p>
+            <p>Filter accepted, suspended, or rejected accounts; sort by request date or name.</p>
+          </div>
+          <div className="admin-section-controls">
+            <label className="admin-filter-label">
+              Status
+              <select
+                className="admin-filter-select"
+                value={rosterStatus}
+                onChange={(event) => setRosterStatus(event.target.value)}
+              >
+                <option value="all">All reviewed</option>
+                <option value="active">Accepted</option>
+                <option value="suspended">Suspended</option>
+                <option value="rejected">Rejected</option>
+              </select>
+            </label>
+            <label className="admin-filter-label">
+              Sort by
+              <select
+                className="admin-filter-select"
+                value={rosterSort}
+                onChange={(event) => setRosterSort(event.target.value)}
+              >
+                <option value="date-desc">Newest first</option>
+                <option value="date-asc">Oldest first</option>
+                <option value="name-asc">Name A–Z</option>
+                <option value="name-desc">Name Z–A</option>
+              </select>
+            </label>
           </div>
         </div>
         {roster.length === 0 ? (
           <div className="admin-empty compact">
             <div className="admin-empty-mark" aria-hidden="true">RO</div>
-            <h2>No instructors yet</h2>
-            <p>Reviewed accounts will appear here.</p>
+            <h2>No matching instructors</h2>
+            <p>Try a different status filter or check back after requests are reviewed.</p>
           </div>
         ) : (
           <ul className="admin-people-list">
