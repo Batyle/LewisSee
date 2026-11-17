@@ -43,6 +43,7 @@ export default function SessionPolicyForm({
   session = null,
   onSave,
   onEnd,
+  classes = [],
   disabled = false,
 }) {
   const [draft, setDraft] = useState(emptyDraft);
@@ -54,12 +55,43 @@ export default function SessionPolicyForm({
   }, [session, section, date]);
 
   const update = (field, value) => setDraft((current) => ({ ...current, [field]: value }));
+  const updateSelection = (field, value) => {
+    setDraft((current) => {
+      const rosterSelection = { ...current.rosterSelection, [field]: value, studentId: "" };
+      if (field === "course") {
+        rosterSelection.yearLevel = "";
+        rosterSelection.block = "";
+      } else if (field === "yearLevel") {
+        rosterSelection.block = "";
+      }
+      return { ...current, rosterSelection };
+    });
+  };
+  const courseOptions = [...new Set(classes.map((item) => item.course).filter(Boolean))].sort();
+  const yearOptions = [...new Set(classes
+    .filter((item) => !draft.rosterSelection.course || item.course === draft.rosterSelection.course)
+    .map((item) => String(item.yearLevel)))].sort((a, b) => Number(a) - Number(b));
+  const blockOptions = [...new Set(classes
+    .filter((item) =>
+      (!draft.rosterSelection.course || item.course === draft.rosterSelection.course) &&
+      (!draft.rosterSelection.yearLevel || String(item.yearLevel) === draft.rosterSelection.yearLevel)
+    )
+    .map((item) => item.block))].sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+
   const submit = (event) => {
     event.preventDefault();
     if (!section || !date) {
       setMessage("Choose a class and date before saving the policy.");
       return;
     }
+    if (
+      draft.rosterScope === "selection" &&
+      !["course", "yearLevel", "block"].some((key) => draft.rosterSelection[key])
+    ) {
+      setMessage("Choose at least one course, year, or block for the attendance roster.");
+      return;
+    }
+
     if (draft.mode === "manual") {
       const saved = onSave({
         id: session?.id || crypto.randomUUID(),
@@ -185,18 +217,53 @@ export default function SessionPolicyForm({
           value={draft.rosterScope}
           onChange={(event) => update("rosterScope", event.target.value)}
         >
-          <option value="class">Selected course / year / block</option>
-          {session?.rosterScope === "selection" && (
-            <option value="selection">Existing filtered roster (unchanged)</option>
-          )}
+          <option value="class">Current scanner course / year / block</option>
+          <option value="selection">Specific course / year / block</option>
           <option value="all">All enrolled students</option>
         </select>
       </label>
+      {draft.rosterScope === "selection" && (
+        <div className="session-policy-grid">
+          <label>
+            Course
+            <select
+              disabled={disabled}
+              value={draft.rosterSelection.course}
+              onChange={(event) => updateSelection("course", event.target.value)}
+            >
+              <option value="">Any course</option>
+              {courseOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+            </select>
+          </label>
+          <label>
+            Year
+            <select
+              disabled={disabled}
+              value={draft.rosterSelection.yearLevel}
+              onChange={(event) => updateSelection("yearLevel", event.target.value)}
+            >
+              <option value="">Any year</option>
+              {yearOptions.map((item) => <option key={item} value={item}>Year {item}</option>)}
+            </select>
+          </label>
+          <label>
+            Block
+            <select
+              disabled={disabled}
+              value={draft.rosterSelection.block}
+              onChange={(event) => updateSelection("block", event.target.value)}
+            >
+              <option value="">Any block</option>
+              {blockOptions.map((item) => <option key={item} value={item}>Block {item}</option>)}
+            </select>
+          </label>
+        </div>
+      )}
       <p className="muted session-policy-help">
         {draft.rosterScope === "all"
           ? "This session can recognize every enrolled student. Attendance is recorded under each student's own class."
           : draft.rosterScope === "selection"
-            ? "This saved session keeps its existing roster filter. Choose another roster option to replace it."
+            ? "Only students matching every selected course, year, and block filter can be recognized or marked absent."
           : "Only students assigned to the selected course, year, and block can be recognized."}
       </p>
       {draft.mode === "manual" ? (

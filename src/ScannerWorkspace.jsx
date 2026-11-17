@@ -1725,6 +1725,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         session={activeSession}
         onSave={saveSessionPolicy}
         onEnd={toggleManualAttendance}
+        classes={activeClasses}
         disabled={!cloudLoaded}
       />
       <section className="attendance-grid">
