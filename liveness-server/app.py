@@ -508,16 +508,14 @@ def ensure_schema(connection: Any) -> None:
             )
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS attendance_email_outbox (
-              record_id VARCHAR(64) PRIMARY KEY,
+              record_id VARCHAR(191) PRIMARY KEY,
               recipient_email VARCHAR(255) NOT NULL,
               status ENUM('pending', 'sent', 'failed') NOT NULL DEFAULT 'pending',
               attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
               next_attempt_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
               sent_at DATETIME NULL,
               last_error TEXT NULL,
-              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-              CONSTRAINT attendance_email_record_fk
-                FOREIGN KEY (record_id) REFERENCES attendance_records (id) ON DELETE CASCADE
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) CHARACTER SET utf8mb4
         """)
 
