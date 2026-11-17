@@ -140,16 +140,16 @@ const toFaceVector = (descriptor) => {
 };
 const currentStudentIdYear = () => String(new Date().getFullYear());
 const studentIdFields = (studentId = "") => {
-  const match = /^C-(\d{4})-(\d{3})$/.exec(studentId);
+  const match = /^C-(\d{4})-(\d{1,4})$/i.exec(studentId);
   return {
     studentIdYear: match?.[1] || currentStudentIdYear(),
-    studentIdNumber: match?.[2] || "",
+    studentIdNumber: match?.[2]?.padStart(4, "0") || "",
   };
 };
 const formatStudentId = ({ studentIdYear, studentIdNumber }) =>
-  `C-${studentIdYear}-${studentIdNumber}`;
+  `C-${studentIdYear}-${studentIdNumber.padStart(4, "0")}`;
 const isValidStudentId = ({ studentIdYear, studentIdNumber }) =>
-  /^\d{4}$/.test(studentIdYear) && /^\d{3}$/.test(studentIdNumber);
+  /^\d{4}$/.test(studentIdYear) && /^\d{1,4}$/.test(studentIdNumber);
 const classLabel = ({ course, yearLevel, block }) =>
   `${course} ${yearLevel}${block}`;
 const belongsToClass = (student, course, yearLevel, block) =>
@@ -1130,7 +1130,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       return setNotice("Names cannot contain numbers.");
     if (!file) return setNotice("Choose a reference portrait.");
     if (!isValidStudentId(form))
-      return setNotice("Enter a 4-digit year and a 3-digit student number.");
+      return setNotice("Enter a 4-digit year and a student number of up to 4 digits.");
     const nextId = formatStudentId(form);
     setEnrolling(true);
     try {
@@ -1211,7 +1211,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     if ([editForm.firstName, editForm.middleName, editForm.lastName].some((value) => /\d/.test(value)))
       return setNotice("Names cannot contain numbers.");
     if (!isValidStudentId(editForm))
-      return setNotice("Enter a 4-digit year and a 3-digit student number.");
+      return setNotice("Enter a 4-digit year and a student number of up to 4 digits.");
     setSavingEdit(true);
     try {
       const nextId = formatStudentId(editForm);
@@ -1725,8 +1725,6 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         session={activeSession}
         onSave={saveSessionPolicy}
         onEnd={toggleManualAttendance}
-        students={students}
-        classes={activeClasses}
         disabled={!cloudLoaded}
       />
       <section className="attendance-grid">
@@ -1983,16 +1981,16 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                     <span aria-hidden="true">-</span>
                     <input
                       required
-                      aria-label="Three-digit student number"
+                      aria-label="Four-digit student number"
                       inputMode="numeric"
-                      pattern="[0-9]{3}"
-                      maxLength={3}
-                      placeholder="781"
+                      pattern="[0-9]{1,4}"
+                      maxLength={4}
+                      placeholder="0343"
                       value={form.studentIdNumber}
                       onChange={(e) => setForm({ ...form, studentIdNumber: e.target.value })}
                     />
                   </div>
-                  <small>Enter the 4-digit year and 3-digit student number.</small>
+                  <small>Student numbers are saved as 4 digits (for example, 0343).</small>
                 </label>
                 <label>
                   <span className="field-label">
@@ -2139,11 +2137,11 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                   <span aria-hidden="true">-</span>
                   <input
                     required
-                    aria-label="Three-digit student number"
+                    aria-label="Four-digit student number"
                     inputMode="numeric"
-                    pattern="[0-9]{3}"
-                    maxLength={3}
-                    placeholder="781"
+                    pattern="[0-9]{1,4}"
+                    maxLength={4}
+                    placeholder="0343"
                     value={editForm.studentIdNumber}
                     onChange={(e) =>
                       setEditForm({ ...editForm, studentIdNumber: e.target.value })

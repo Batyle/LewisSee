@@ -246,6 +246,15 @@ async function ensureInstructorIdSchema(pool) {
       if (error.code !== "ER_DUP_KEYNAME") throw error;
     }
   }
+  await pool.query(`
+    UPDATE instructors
+    SET instructor_id = CONCAT(
+      UPPER(SUBSTRING_INDEX(instructor_id, '-', 2)),
+      '-',
+      LPAD(SUBSTRING_INDEX(instructor_id, '-', -1), 4, '0')
+    )
+    WHERE instructor_id REGEXP '^C-[0-9]{4}-[0-9]{1,3}$'
+  `);
 }
 
 async function assignInstructorId(pool, uid) {
@@ -253,7 +262,7 @@ async function assignInstructorId(pool, uid) {
   if (!rows[0]) return "";
   if (rows[0].instructor_id) return rows[0].instructor_id;
   for (let attempt = 0; attempt < 30; attempt += 1) {
-    const instructorId = `C-${new Date().getFullYear()}-${String(randomInt(1000)).padStart(3, "0")}`;
+    const instructorId = `C-${new Date().getFullYear()}-${String(randomInt(10000)).padStart(4, "0")}`;
     try {
       const [result] = await pool.execute(
         "UPDATE instructors SET instructor_id = ? WHERE uid = ? AND instructor_id IS NULL",
@@ -443,11 +452,11 @@ async function handleAdmin(req, res, path, pool) {
     const name = typeof body.name === "string" ? body.name.trim().replace(/\s+/g, " ") : "";
     const instructorId = typeof body.instructorId === "string" ? body.instructorId.trim().toUpperCase() : "";
     const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
-    if (!name || name.length > 255 || !/^C-\d{4}-\d{3}$/.test(instructorId)
+    if (!name || name.length > 255 || !/^C-\d{4}-\d{4}$/.test(instructorId)
       || (body.newPassword !== undefined && typeof body.newPassword !== "string")
       || (newPassword && (newPassword.length < 8 || newPassword.length > 128))) {
       return respond(res, 400, {
-        message: "Provide a name, an instructor ID in C-YYYY-NNN format, and an optional password of 8–128 characters.",
+        message: "Provide a name, an instructor ID in C-YYYY-NNNN format, and an optional password of 8–128 characters.",
       });
     }
     const [existing] = await pool.execute(

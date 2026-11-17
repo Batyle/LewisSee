@@ -20,8 +20,8 @@ Using LewisSee requires internet access and browser camera permission. Recogniti
 - **Scheduled absences:** Students without a check-in are marked absent after a scheduled session's final check-in window. Email notifications are sent when delivery is available; manual sessions are excluded.
 - **Attendance history:** Search, sort, review, correct, and remove saved attendance records.
 - **Data integrity:** Student IDs and non-empty emails are checked for duplicates, while distinct students may share a name. Attendance sessions, record IDs, and one-record-per-student/class/day keys are validated by the API and backed by database uniqueness constraints.
-- **Student enrollment:** Instructors can enroll students with first, middle, and last names, a reference photo, and class assignment. Names display with middle initials (for example, `Luige E. Dela Torre`).
-- **Instructor and administrator workspaces:** Instructors manage classroom attendance; administrators review instructor access requests and manage instructor accounts.
+- **Student enrollment:** Instructors can enroll students with first, middle, and last names, a reference photo, and class assignment. Student IDs use `C-YYYY-NNNN` format; existing three-digit IDs are zero-padded. Names display with middle initials (for example, `Luige E. Dela Torre`).
+- **Instructor and administrator workspaces:** Instructors manage classroom attendance; administrators review instructor access requests and manage instructor accounts with `C-YYYY-NNNN` IDs.
 - **Email notifications:** EmailJS can send check-in notifications to students with an email address on file, notify administrators when an instructor access request is submitted, and send instructors administrator decisions and account updates.
 - **Responsive interface:** The attendance and administration workflows adapt to mobile and desktop screens.
 

@@ -1,11 +1,16 @@
 const normalize = (value) => String(value || "").trim().toLocaleLowerCase();
+const normalizeStudentId = (value) => {
+  const id = String(value || "").trim();
+  const match = /^C-(\d{4})-(\d{1,4})$/i.exec(id);
+  return match ? `C-${match[1]}-${match[2].padStart(4, "0")}`.toLocaleLowerCase() : normalize(id);
+};
 
 export function matchesRosterSelection(student, selection = {}) {
   return (
     (!selection.course || normalize(student.course) === normalize(selection.course)) &&
     (!selection.yearLevel || String(student.yearLevel) === String(selection.yearLevel)) &&
     (!selection.block || normalize(student.block) === normalize(selection.block)) &&
-    (!selection.studentId || normalize(student.studentId) === normalize(selection.studentId))
+    (!selection.studentId || normalizeStudentId(student.studentId) === normalizeStudentId(selection.studentId))
   );
 }
 

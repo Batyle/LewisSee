@@ -208,6 +208,24 @@ export async function ensureAttendanceSchema(pool) {
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     ) CHARACTER SET utf8mb4
   `);
+  await pool.query(`
+    UPDATE attendance_records
+    SET student_id = CONCAT(
+      UPPER(SUBSTRING_INDEX(student_id, '-', 2)),
+      '-',
+      LPAD(SUBSTRING_INDEX(student_id, '-', -1), 4, '0')
+    )
+    WHERE UPPER(student_id) REGEXP '^C-[0-9]{4}-[0-9]{1,3}$'
+  `);
+  await pool.query(`
+    UPDATE students
+    SET student_id = CONCAT(
+      UPPER(SUBSTRING_INDEX(student_id, '-', 2)),
+      '-',
+      LPAD(SUBSTRING_INDEX(student_id, '-', -1), 4, '0')
+    )
+    WHERE UPPER(student_id) REGEXP '^C-[0-9]{4}-[0-9]{1,3}$'
+  `);
 
   const [[studentColumns], [attendanceColumns], [sessionColumns]] = await Promise.all([
     pool.query("SHOW COLUMNS FROM students"),

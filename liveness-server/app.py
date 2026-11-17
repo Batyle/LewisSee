@@ -238,6 +238,14 @@ def determine_attendance_status(
     return "Absent"
 
 
+def normalize_student_id(value: Any) -> str:
+    student_id = str(value or "").strip()
+    match = re.fullmatch(r"C-(\d{4})-(\d{1,4})", student_id, re.IGNORECASE)
+    if match:
+        return f"C-{match.group(1)}-{match.group(2).zfill(4)}".casefold()
+    return student_id.casefold()
+
+
 def roster_selection_matches(student: Any, selection: dict[str, Any] | None) -> bool:
     selection = selection or {}
     course = student.get("course", "") if isinstance(student, dict) else student.course
@@ -248,7 +256,7 @@ def roster_selection_matches(student: Any, selection: dict[str, Any] | None) -> 
         (not selection.get("course") or str(course).strip().casefold() == str(selection["course"]).strip().casefold())
         and (not selection.get("yearLevel") or str(year_level) == str(selection["yearLevel"]))
         and (not selection.get("block") or str(block).strip().casefold() == str(selection["block"]).strip().casefold())
-        and (not selection.get("studentId") or str(student_id).strip().casefold() == str(selection["studentId"]).strip().casefold())
+        and (not selection.get("studentId") or normalize_student_id(student_id) == normalize_student_id(selection["studentId"]))
     )
 
 
@@ -319,7 +327,7 @@ class InstructorDecision(BaseModel):
 
 class InstructorUpdate(BaseModel):
     name: str = Field(min_length=1, max_length=255)
-    instructorId: str = Field(pattern=r"^C-\d{4}-\d{3}$")
+    instructorId: str = Field(pattern=r"^C-\d{4}-\d{4}$")
     newPassword: str = Field(default="", max_length=128)
 
 
@@ -429,6 +437,15 @@ def ensure_schema(connection: Any) -> None:
         cursor.execute("SHOW INDEX FROM instructors WHERE Key_name = 'unique_instructor_id'")
         if not cursor.fetchone():
             cursor.execute("CREATE UNIQUE INDEX unique_instructor_id ON instructors (instructor_id)")
+        cursor.execute("""
+            UPDATE instructors
+            SET instructor_id = CONCAT(
+              UPPER(SUBSTRING_INDEX(instructor_id, '-', 2)),
+              '-',
+              LPAD(SUBSTRING_INDEX(instructor_id, '-', -1), 4, '0')
+            )
+            WHERE instructor_id REGEXP '^C-[0-9]{4}-[0-9]{1,3}$'
+        """)
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS class_groups (
               course VARCHAR(64) NOT NULL,
@@ -565,6 +582,24 @@ def ensure_schema(connection: Any) -> None:
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
             ) CHARACTER SET utf8mb4
         """)
+        cursor.execute("""
+            UPDATE attendance_records
+            SET student_id = CONCAT(
+              UPPER(SUBSTRING_INDEX(student_id, '-', 2)),
+              '-',
+              LPAD(SUBSTRING_INDEX(student_id, '-', -1), 4, '0')
+            )
+            WHERE UPPER(student_id) REGEXP '^C-[0-9]{4}-[0-9]{1,3}$'
+        """)
+        cursor.execute("""
+            UPDATE students
+            SET student_id = CONCAT(
+              UPPER(SUBSTRING_INDEX(student_id, '-', 2)),
+              '-',
+              LPAD(SUBSTRING_INDEX(student_id, '-', -1), 4, '0')
+            )
+            WHERE UPPER(student_id) REGEXP '^C-[0-9]{4}-[0-9]{1,3}$'
+        """)
 
 
 def jwt_secret() -> str:
@@ -673,7 +708,7 @@ def assign_instructor_id(connection: Any, uid: str) -> str:
         if row["instructor_id"]:
             return row["instructor_id"]
         for _ in range(30):
-            instructor_id = f"C-{datetime.now().year}-{secrets.randbelow(1000):03d}"
+            instructor_id = f"C-{datetime.now().year}-{secrets.randbelow(10000):04d}"
             try:
                 cursor.execute(
                     "UPDATE instructors SET instructor_id = %s WHERE uid = %s AND instructor_id IS NULL",
@@ -752,8 +787,8 @@ def update_instructor(
 ) -> dict[str, Any]:
     name = " ".join(payload.name.split())
     instructor_id = payload.instructorId.strip().upper()
-    if not name or any(character.isdigit() for character in name) or not re.fullmatch(r"C-\d{4}-\d{3}", instructor_id):
-        raise HTTPException(status_code=400, detail="Provide a name without numbers and an instructor ID in C-YYYY-NNN format.")
+    if not name or any(character.isdigit() for character in name) or not re.fullmatch(r"C-\d{4}-\d{4}", instructor_id):
+        raise HTTPException(status_code=400, detail="Provide a name without numbers and an instructor ID in C-YYYY-NNNN format.")
     if payload.newPassword and len(payload.newPassword) < 8:
         raise HTTPException(status_code=400, detail="Passwords must contain at least 8 characters.")
 
@@ -1438,7 +1473,7 @@ def process_scheduled_absences(
                             parameters.append(roster_selection["block"])
                         if roster_selection.get("studentId"):
                             filters.append("LOWER(TRIM(s.student_id)) = LOWER(%s)")
-                            parameters.append(roster_selection["studentId"])
+                            parameters.append(normalize_student_id(roster_selection["studentId"]))
                         if not filters:
                             continue
                         cursor.execute(

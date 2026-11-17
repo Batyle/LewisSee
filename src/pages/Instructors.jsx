@@ -445,8 +445,8 @@ export default function Instructors() {
               Instructor ID
               <input
                 required
-                pattern="C-[0-9]{4}-[0-9]{3}"
-                placeholder="C-2026-781"
+                pattern="C-[0-9]{4}-[0-9]{4}"
+                placeholder="C-2026-0781"
                 value={editForm.instructorId}
                 onChange={(event) => setEditForm({ ...editForm, instructorId: event.target.value })}
               />
