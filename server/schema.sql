@@ -29,6 +29,14 @@ CREATE TABLE instructors (
   FOREIGN KEY (reviewed_by) REFERENCES admins(id) ON DELETE SET NULL
 );
 
+CREATE TABLE instructor_sessions (
+  instructor_uid VARCHAR(64) NOT NULL PRIMARY KEY,
+  session_id CHAR(36) NOT NULL,
+  expires_at DATETIME(3) NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  KEY sessions_by_expiry (expires_at)
+);
+
 CREATE TABLE instructor_blocks (
   instructor_id INT NOT NULL,
   block_id INT NOT NULL,

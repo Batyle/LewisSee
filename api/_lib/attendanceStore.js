@@ -105,7 +105,10 @@ function determineAttendanceStatus(currentScanTime, timeInStart, timeInEnd, late
 }
 
 function resolveRecordStatus(record, sessionsByKey) {
-  const session = sessionsByKey.get(`${record.section.trim().toLowerCase()}|${record.date}`);
+  const session = sessionsByKey.get(`${record.section.trim().toLowerCase()}|${record.date}`) ||
+    [...sessionsByKey.values()].find(
+      (item) => item.date === record.date && item.rosterScope === "all",
+    );
   if (!session) return ["Present", "Late", "Absent"].includes(record.status) ? record.status : "Present";
   if (session.mode === "manual") return "Present";
   const ranges = sessionTimeRanges(session);
@@ -132,6 +135,9 @@ export async function ensureAttendanceSchema(pool) {
     CREATE TABLE IF NOT EXISTS students (
       student_id VARCHAR(191) PRIMARY KEY,
       name VARCHAR(255) NOT NULL,
+      first_name VARCHAR(128) NOT NULL DEFAULT '',
+      middle_name VARCHAR(128) NOT NULL DEFAULT '',
+      last_name VARCHAR(128) NOT NULL DEFAULT '',
       email VARCHAR(255) NOT NULL DEFAULT '',
       course VARCHAR(64) NOT NULL,
       year_level TINYINT UNSIGNED NOT NULL,
@@ -152,6 +158,7 @@ export async function ensureAttendanceSchema(pool) {
       attendance_time VARCHAR(32) NOT NULL,
       status ENUM('Present', 'Late', 'Absent') NOT NULL DEFAULT 'Present',
       time_out VARCHAR(32) NULL,
+      attendance_source VARCHAR(32) NOT NULL DEFAULT 'recorded',
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       UNIQUE KEY one_checkin_per_class_day (student_id, attendance_date, section),
       KEY attendance_by_date (attendance_date, section)
@@ -171,11 +178,26 @@ export async function ensureAttendanceSchema(pool) {
       time_out TIME NULL,
       time_out_end TIME NULL,
       attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed',
+      roster_scope VARCHAR(16) NOT NULL DEFAULT 'class',
       attendance_ended BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
       UNIQUE KEY one_session_per_class_day (section, session_date),
       KEY sessions_by_date (session_date, section)
+    ) CHARACTER SET utf8mb4
+  `);
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS attendance_email_outbox (
+      record_id VARCHAR(64) PRIMARY KEY,
+      recipient_email VARCHAR(255) NOT NULL,
+      status ENUM('pending', 'sent', 'failed') NOT NULL DEFAULT 'pending',
+      attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+      next_attempt_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+      sent_at DATETIME NULL,
+      last_error TEXT NULL,
+      created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      CONSTRAINT attendance_email_record_fk
+        FOREIGN KEY (record_id) REFERENCES attendance_records (id) ON DELETE CASCADE
     ) CHARACTER SET utf8mb4
   `);
 
@@ -185,6 +207,11 @@ export async function ensureAttendanceSchema(pool) {
     pool.query("SHOW COLUMNS FROM attendance_sessions"),
   ]);
   const studentFields = new Set(studentColumns.map((row) => row.Field));
+  for (const column of ["first_name", "middle_name", "last_name"]) {
+    if (!studentFields.has(column)) {
+      await pool.query(`ALTER TABLE students ADD COLUMN ${column} VARCHAR(128) NOT NULL DEFAULT ''`);
+    }
+  }
   if (!studentFields.has("course")) {
     await pool.query("ALTER TABLE students ADD COLUMN course VARCHAR(64) NOT NULL DEFAULT 'BSIT' AFTER email");
   }
@@ -204,6 +231,11 @@ export async function ensureAttendanceSchema(pool) {
   if (!attendanceByField.time_out) {
     await pool.query("ALTER TABLE attendance_records ADD COLUMN time_out VARCHAR(32) NULL AFTER status");
   }
+  if (!attendanceByField.attendance_source) {
+    await pool.query(
+      "ALTER TABLE attendance_records ADD COLUMN attendance_source VARCHAR(32) NOT NULL DEFAULT 'recorded' AFTER time_out",
+    );
+  }
 
   const sessionFields = new Set(sessionColumns.map((row) => row.Field));
   for (const column of ["time_in_end", "late_start", "late_end", "time_out_end"]) {
@@ -217,6 +249,15 @@ export async function ensureAttendanceSchema(pool) {
   if (!sessionFields.has("attendance_ended")) {
     await pool.query("ALTER TABLE attendance_sessions ADD COLUMN attendance_ended BOOLEAN NOT NULL DEFAULT FALSE");
   }
+  if (!sessionFields.has("roster_scope")) {
+    await pool.query("ALTER TABLE attendance_sessions ADD COLUMN roster_scope VARCHAR(16) NOT NULL DEFAULT 'class'");
+  }
+  const [nameIndexes] = await pool.query(
+    "SHOW INDEX FROM students WHERE Key_name = 'unique_student_name'",
+  );
+  if (nameIndexes.length) {
+    await pool.query("ALTER TABLE students DROP INDEX unique_student_name");
+  }
 }
 
 function formatMysqlDate(value) {
@@ -227,11 +268,11 @@ function formatMysqlDate(value) {
 export async function loadAttendanceStore(pool) {
   await ensureAttendanceSchema(pool);
   const [studentRows] = await pool.query(
-    "SELECT student_id, name, email, course, year_level, block, descriptor_json, photo FROM students ORDER BY name",
+    "SELECT student_id, name, first_name, middle_name, last_name, email, course, year_level, block, descriptor_json, photo FROM students ORDER BY name",
   );
   const [recordRows] = await pool.query(`
     SELECT id, student_id, student_name, DATE_FORMAT(attendance_date, '%Y-%m-%d') AS date,
-           section, attendance_time, status, time_out
+           section, attendance_time, status, time_out, attendance_source
     FROM attendance_records
     ORDER BY attendance_date DESC, created_at DESC
   `);
@@ -247,7 +288,7 @@ export async function loadAttendanceStore(pool) {
            TIME_FORMAT(late_end, '%H:%i') AS late_end,
            TIME_FORMAT(time_out, '%H:%i') AS time_out,
            TIME_FORMAT(time_out_end, '%H:%i') AS time_out_end,
-           attendance_mode, attendance_ended
+           attendance_mode, attendance_ended, roster_scope
     FROM attendance_sessions
     ORDER BY session_date DESC, section
   `);
@@ -255,6 +296,9 @@ export async function loadAttendanceStore(pool) {
   const students = studentRows.map((row) => ({
     studentId: row.student_id,
     name: row.name,
+    firstName: row.first_name,
+    middleName: row.middle_name,
+    lastName: row.last_name,
     email: row.email,
     course: row.course,
     yearLevel: row.year_level,
@@ -271,6 +315,7 @@ export async function loadAttendanceStore(pool) {
     time: row.attendance_time,
     status: row.status || "Present",
     timeOut: row.time_out,
+    attendanceSource: row.attendance_source,
   }));
   const classes = classRows.map((row) => ({
     course: row.course,
@@ -293,6 +338,7 @@ export async function loadAttendanceStore(pool) {
       timeOut: row.time_out,
       timeOutEnd: row.time_out_end,
       mode,
+      rosterScope: row.roster_scope || "class",
       ended: Boolean(mode === "manual" && row.attendance_ended),
     };
     if (session.mode === "manual") return session;
@@ -356,38 +402,36 @@ export async function replaceAttendanceStore(pool, storeInput) {
   }
 
   const studentIds = new Set();
-  const studentNames = new Set();
   const studentEmails = new Set();
   for (const student of store.students) {
     const studentId = String(student.studentId || "").trim().toLowerCase();
-    const studentName = String(student.name || "").trim().toLowerCase();
+    const studentName = String(student.name || "").trim();
     const email = String(student.email || "").trim().toLowerCase();
     if (!studentId || !studentName) {
       const error = new Error("Every student needs a name and student ID.");
       error.statusCode = 422;
       throw error;
     }
-    if (studentIds.has(studentId) || studentNames.has(studentName) || (email && studentEmails.has(email))) {
-      const error = new Error("Duplicate students, names, or emails are not allowed.");
+    if (studentIds.has(studentId) || (email && studentEmails.has(email))) {
+      const error = new Error("Duplicate student IDs or emails are not allowed.");
       error.statusCode = 422;
       throw error;
     }
     studentIds.add(studentId);
-    studentNames.add(studentName);
     if (email) studentEmails.add(email);
   }
 
   const recordIds = new Set();
   const attendanceKeys = new Set();
   for (const record of store.records) {
-    const recordId = record.id.toLowerCase();
-    const studentId = record.studentId.toLowerCase();
-    const section = record.section.toLowerCase();
+    const recordId = String(record.id || "").trim().toLowerCase();
+    const studentId = String(record.studentId || "").trim().toLowerCase();
+    const section = String(record.section || "").trim().toLowerCase();
     const key = JSON.stringify([studentId, record.date, section]);
-    if (!recordId || recordId.length > 64 || !section) {
-      const error = new Error("Every attendance record needs a valid ID and class.");
-      error.statusCode = 422;
-      throw error;
+    if (!recordId || recordId.length > 64 || !section || !studentIds.has(studentId) ||
+      !isValidCalendarDate(String(record.date || "")) ||
+      !["Present", "Late", "Absent"].includes(record.status || "Present")) {
+      throw validationError("Every attendance record needs a valid ID, enrolled student, class, date, and status.");
     }
     if (recordIds.has(recordId)) {
       const error = new Error("Duplicate attendance record IDs are not allowed.");
@@ -456,8 +500,11 @@ export async function replaceAttendanceStore(pool, storeInput) {
   }
 
   const sessionKeys = new Set();
+  const sessionIds = new Set();
+  const allRosterSessionDates = new Set();
   for (const session of store.sessions) {
     const key = `${String(session.section || "").trim().toLowerCase()}|${session.date}`;
+    const sessionId = String(session.id || "").trim().toLowerCase();
     if (
       !String(session.id || "").trim() ||
       String(session.id).trim().length > 64 ||
@@ -467,6 +514,10 @@ export async function replaceAttendanceStore(pool, storeInput) {
     ) {
       throw validationError("Each attendance session needs a valid ID, class, and date.");
     }
+    if (sessionIds.has(sessionId)) {
+      throw validationError("Attendance session IDs must be unique.");
+    }
+    sessionIds.add(sessionId);
     if (sessionKeys.has(key)) {
       const error = new Error("Duplicate attendance sessions are not allowed.");
       error.statusCode = 422;
@@ -476,6 +527,15 @@ export async function replaceAttendanceStore(pool, storeInput) {
       const error = new Error("Attendance session mode must be timed or manual.");
       error.statusCode = 422;
       throw error;
+    }
+    if (!["class", "all"].includes(session.rosterScope || "class")) {
+      throw validationError("Attendance roster scope must be class or all.");
+    }
+    if ((session.rosterScope || "class") === "all") {
+      if (allRosterSessionDates.has(session.date)) {
+        throw validationError("Only one all-students attendance session is allowed per date.");
+      }
+      allRosterSessionDates.add(session.date);
     }
     if (session.mode === "manual") {
       sessionKeys.add(key);
@@ -523,7 +583,7 @@ export async function replaceAttendanceStore(pool, storeInput) {
   try {
     await connection.beginTransaction();
     await ensureAttendanceSchema(connection);
-    await connection.query("DELETE FROM attendance_records");
+    await connection.query("DELETE FROM attendance_records WHERE attendance_source <> 'auto_absent'");
     await connection.query("DELETE FROM attendance_sessions");
     await connection.query("DELETE FROM students");
     await connection.query("DELETE FROM class_groups");
@@ -537,11 +597,14 @@ export async function replaceAttendanceStore(pool, storeInput) {
     if (store.students.length) {
       await connection.query(
         `INSERT INTO students
-          (student_id, name, email, course, year_level, block, descriptor_json, photo)
+          (student_id, name, first_name, middle_name, last_name, email, course, year_level, block, descriptor_json, photo)
          VALUES ?`,
         [store.students.map((student) => [
           student.studentId,
           student.name,
+          student.firstName || "",
+          student.middleName || "",
+          student.lastName || "",
           student.email || "",
           student.course,
           student.yearLevel,
@@ -551,12 +614,17 @@ export async function replaceAttendanceStore(pool, storeInput) {
         ])],
       );
     }
+    await connection.query(`
+      DELETE FROM attendance_records
+      WHERE attendance_source = 'auto_absent'
+        AND student_id NOT IN (SELECT student_id FROM students)
+    `);
     if (store.sessions.length) {
       await connection.query(
         `INSERT INTO attendance_sessions
           (id, section, session_date, required_time_in, time_in_end,
            late_start, late_end, grace_period_minutes, late_threshold_minutes,
-           time_out, time_out_end, attendance_mode, attendance_ended)
+           time_out, time_out_end, attendance_mode, attendance_ended, roster_scope)
          VALUES ?`,
         [store.sessions.map((session) => {
           const ranges = sessionTimeRanges(session);
@@ -579,16 +647,30 @@ export async function replaceAttendanceStore(pool, storeInput) {
             formatTimeHhmm(session.timeOutEnd),
             isManual ? "manual" : "timed",
             Boolean(isManual && session.ended),
+            session.rosterScope || "class",
           ];
         })],
       );
     }
     if (store.records.length) {
-      await connection.query(
+      const recordsToInsert = [];
+      for (const record of store.records) {
+        const isUnchangedAutoAbsence =
+          record.attendanceSource === "auto_absent" && record.status === "Absent";
+        if (isUnchangedAutoAbsence) continue;
+        await connection.execute(
+          `DELETE FROM attendance_records
+           WHERE attendance_source = 'auto_absent'
+             AND student_id = ? AND attendance_date = ? AND section = ?`,
+          [record.studentId, formatMysqlDate(record.date), record.section],
+        );
+        recordsToInsert.push(record);
+      }
+      if (recordsToInsert.length) await connection.query(
         `INSERT INTO attendance_records
           (id, student_id, student_name, attendance_date, section, attendance_time, status, time_out)
          VALUES ?`,
-        [store.records.map((record) => [
+        [recordsToInsert.map((record) => [
           record.id,
           record.studentId,
           record.name,

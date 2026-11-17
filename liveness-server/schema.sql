@@ -45,6 +45,9 @@ CREATE TABLE IF NOT EXISTS class_groups (
 CREATE TABLE IF NOT EXISTS students (
   student_id VARCHAR(191) PRIMARY KEY,
   name VARCHAR(255) NOT NULL,
+  first_name VARCHAR(128) NOT NULL DEFAULT '',
+  middle_name VARCHAR(128) NOT NULL DEFAULT '',
+  last_name VARCHAR(128) NOT NULL DEFAULT '',
   email VARCHAR(255) NOT NULL DEFAULT '',
   course VARCHAR(64) NOT NULL,
   year_level TINYINT UNSIGNED NOT NULL,
@@ -52,8 +55,7 @@ CREATE TABLE IF NOT EXISTS students (
   descriptor_json LONGTEXT NOT NULL,
   photo MEDIUMTEXT NOT NULL,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  UNIQUE KEY unique_student_name (name)
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS attendance_records (
@@ -65,10 +67,24 @@ CREATE TABLE IF NOT EXISTS attendance_records (
   attendance_time VARCHAR(32) NOT NULL,
   status ENUM('Present', 'Late', 'Absent') NOT NULL DEFAULT 'Present',
   time_out VARCHAR(32) NULL,
+  attendance_source VARCHAR(32) NOT NULL DEFAULT 'recorded',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   UNIQUE KEY one_checkin_per_class_day (student_id, attendance_date, section),
   KEY attendance_by_date (attendance_date, section),
   CONSTRAINT attendance_status_check CHECK (status IN ('Present', 'Late', 'Absent'))
+) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS attendance_email_outbox (
+  record_id VARCHAR(64) PRIMARY KEY,
+  recipient_email VARCHAR(255) NOT NULL,
+  status ENUM('pending', 'sent', 'failed') NOT NULL DEFAULT 'pending',
+  attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  next_attempt_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+  sent_at DATETIME NULL,
+  last_error TEXT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  CONSTRAINT attendance_email_record_fk
+    FOREIGN KEY (record_id) REFERENCES attendance_records (id) ON DELETE CASCADE
 ) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- Attendance policy for one class session (one per section + date).
@@ -82,6 +98,7 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
   time_out TIME NULL,
   time_out_end TIME NULL,
   attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed',
+  roster_scope VARCHAR(16) NOT NULL DEFAULT 'class',
   attendance_ended BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -94,6 +111,18 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
 -- ---------------------------------------------------------------------------
 
 SET @db := DATABASE();
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.STATISTICS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'students' AND INDEX_NAME = 'unique_student_name'
+    ),
+    'ALTER TABLE students DROP INDEX unique_student_name',
+    'SELECT 1'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
 
 SET @sql := (
   SELECT IF(
@@ -171,6 +200,18 @@ SET @sql := (
   SELECT IF(
     EXISTS(
       SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'roster_scope'
+    ),
+    'SELECT 1',
+    'ALTER TABLE attendance_sessions ADD COLUMN roster_scope VARCHAR(16) NOT NULL DEFAULT ''class'''
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
       WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'attendance_sessions' AND COLUMN_NAME = 'attendance_ended'
     ),
     'SELECT 1',
@@ -231,6 +272,42 @@ SET @sql := (
   SELECT IF(
     EXISTS(
       SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'students' AND COLUMN_NAME = 'first_name'
+    ),
+    'SELECT 1',
+    'ALTER TABLE students ADD COLUMN first_name VARCHAR(128) NOT NULL DEFAULT '''' AFTER name'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'students' AND COLUMN_NAME = 'middle_name'
+    ),
+    'SELECT 1',
+    'ALTER TABLE students ADD COLUMN middle_name VARCHAR(128) NOT NULL DEFAULT '''' AFTER first_name'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'students' AND COLUMN_NAME = 'last_name'
+    ),
+    'SELECT 1',
+    'ALTER TABLE students ADD COLUMN last_name VARCHAR(128) NOT NULL DEFAULT '''' AFTER middle_name'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
       WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'students' AND COLUMN_NAME = 'year_level'
     ),
     'SELECT 1',
@@ -278,6 +355,18 @@ SET @sql := (
     ),
     'SELECT 1',
     'ALTER TABLE attendance_records ADD COLUMN time_out VARCHAR(32) NULL AFTER status'
+  )
+);
+PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;
+
+SET @sql := (
+  SELECT IF(
+    EXISTS(
+      SELECT 1 FROM information_schema.COLUMNS
+      WHERE TABLE_SCHEMA = @db AND TABLE_NAME = 'attendance_records' AND COLUMN_NAME = 'attendance_source'
+    ),
+    'SELECT 1',
+    'ALTER TABLE attendance_records ADD COLUMN attendance_source VARCHAR(32) NOT NULL DEFAULT ''recorded'' AFTER time_out'
   )
 );
 PREPARE stmt FROM @sql; EXECUTE stmt; DEALLOCATE PREPARE stmt;

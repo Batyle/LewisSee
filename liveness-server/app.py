@@ -17,6 +17,8 @@ from datetime import datetime, timedelta, time, timezone
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo
 
 import bcrypt
@@ -24,7 +26,7 @@ import cv2
 import jwt
 import numpy as np
 import pymysql
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile, status
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
@@ -83,6 +85,9 @@ app.add_middleware(
 
 class Student(BaseModel):
     name: str = Field(min_length=1, max_length=255)
+    firstName: str = Field(default="", max_length=128)
+    middleName: str = Field(default="", max_length=128)
+    lastName: str = Field(default="", max_length=128)
     studentId: str = Field(min_length=1, max_length=191)
     email: str = Field(default="", max_length=255)
     course: str = Field(min_length=2, max_length=64)
@@ -101,6 +106,7 @@ class AttendanceRecord(BaseModel):
     time: str = Field(min_length=1, max_length=32)
     status: str = Field(default="Present", pattern=r"^(Present|Late|Absent)$")
     timeOut: str | None = Field(default=None, max_length=32)
+    attendanceSource: str | None = Field(default=None, max_length=32)
 
 
 class ClassGroup(BaseModel):
@@ -124,6 +130,7 @@ class AttendanceSession(BaseModel):
     lateThresholdMinutes: int | None = Field(default=None, ge=0, le=720)
     timeOut: str | None = Field(default=None, max_length=8)
     mode: str = Field(default="timed", pattern=r"^(timed|manual)$")
+    rosterScope: str = Field(default="class", pattern=r"^(class|all)$")
     ended: bool = False
 
 
@@ -232,6 +239,12 @@ def determine_attendance_status(
 
 def resolve_record_status(record: AttendanceRecord, sessions_by_key: dict[tuple[str, str], AttendanceSession]) -> str:
     session = sessions_by_key.get((record.section.strip().casefold(), record.date))
+    if not session:
+        session = next(
+            (item for item in sessions_by_key.values()
+             if item.date == record.date and item.rosterScope == "all"),
+            None,
+        )
     if not session:
         return record.status if record.status in {"Present", "Late", "Absent"} else "Present"
     if session.mode == "manual":
@@ -385,6 +398,9 @@ def ensure_schema(connection: Any) -> None:
             CREATE TABLE IF NOT EXISTS students (
               student_id VARCHAR(191) PRIMARY KEY,
               name VARCHAR(255) NOT NULL,
+              first_name VARCHAR(128) NOT NULL DEFAULT '',
+              middle_name VARCHAR(128) NOT NULL DEFAULT '',
+              last_name VARCHAR(128) NOT NULL DEFAULT '',
               email VARCHAR(255) NOT NULL DEFAULT '',
               course VARCHAR(64) NOT NULL,
               year_level TINYINT UNSIGNED NOT NULL,
@@ -399,6 +415,9 @@ def ensure_schema(connection: Any) -> None:
         # Upgrade them in place so staff do not have to recreate the database.
         cursor.execute("SHOW COLUMNS FROM students")
         student_columns = {row["Field"] for row in cursor.fetchall()}
+        for column in ("first_name", "middle_name", "last_name"):
+            if column not in student_columns:
+                cursor.execute(f"ALTER TABLE students ADD COLUMN {column} VARCHAR(128) NOT NULL DEFAULT ''")
         if "course" not in student_columns:
             cursor.execute("ALTER TABLE students ADD COLUMN course VARCHAR(64) NOT NULL DEFAULT 'BSIT' AFTER email")
         if "year_level" not in student_columns:
@@ -406,8 +425,8 @@ def ensure_schema(connection: Any) -> None:
         if "block" not in student_columns:
             cursor.execute("ALTER TABLE students ADD COLUMN block VARCHAR(12) NOT NULL DEFAULT 'A' AFTER year_level")
         cursor.execute("SHOW INDEX FROM students WHERE Key_name = 'unique_student_name'")
-        if not cursor.fetchone():
-            cursor.execute("CREATE UNIQUE INDEX unique_student_name ON students (name)")
+        if cursor.fetchone():
+            cursor.execute("ALTER TABLE students DROP INDEX unique_student_name")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS attendance_records (
               id VARCHAR(64) PRIMARY KEY,
@@ -418,6 +437,7 @@ def ensure_schema(connection: Any) -> None:
               attendance_time VARCHAR(32) NOT NULL,
               status ENUM('Present', 'Late', 'Absent') NOT NULL DEFAULT 'Present',
               time_out VARCHAR(32) NULL,
+              attendance_source VARCHAR(32) NOT NULL DEFAULT 'recorded',
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
               UNIQUE KEY one_checkin_per_class_day (student_id, attendance_date, section),
               KEY attendance_by_date (attendance_date, section)
@@ -443,6 +463,10 @@ def ensure_schema(connection: Any) -> None:
             cursor.execute(
                 "ALTER TABLE attendance_records ADD COLUMN time_out VARCHAR(32) NULL AFTER status"
             )
+        if "attendance_source" not in attendance_columns:
+            cursor.execute(
+                "ALTER TABLE attendance_records ADD COLUMN attendance_source VARCHAR(32) NOT NULL DEFAULT 'recorded' AFTER time_out"
+            )
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS attendance_sessions (
               id VARCHAR(64) PRIMARY KEY,
@@ -457,6 +481,7 @@ def ensure_schema(connection: Any) -> None:
               time_out TIME NULL,
               time_out_end TIME NULL,
               attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed',
+              roster_scope VARCHAR(16) NOT NULL DEFAULT 'class',
               attendance_ended BOOLEAN NOT NULL DEFAULT FALSE,
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -477,6 +502,24 @@ def ensure_schema(connection: Any) -> None:
             cursor.execute(
                 "ALTER TABLE attendance_sessions ADD COLUMN attendance_ended BOOLEAN NOT NULL DEFAULT FALSE"
             )
+        if "roster_scope" not in session_columns:
+            cursor.execute(
+                "ALTER TABLE attendance_sessions ADD COLUMN roster_scope VARCHAR(16) NOT NULL DEFAULT 'class'"
+            )
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS attendance_email_outbox (
+              record_id VARCHAR(64) PRIMARY KEY,
+              recipient_email VARCHAR(255) NOT NULL,
+              status ENUM('pending', 'sent', 'failed') NOT NULL DEFAULT 'pending',
+              attempts TINYINT UNSIGNED NOT NULL DEFAULT 0,
+              next_attempt_at DATETIME NULL DEFAULT CURRENT_TIMESTAMP,
+              sent_at DATETIME NULL,
+              last_error TEXT NULL,
+              created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+              CONSTRAINT attendance_email_record_fk
+                FOREIGN KEY (record_id) REFERENCES attendance_records (id) ON DELETE CASCADE
+            ) CHARACTER SET utf8mb4
+        """)
 
 
 def jwt_secret() -> str:
@@ -898,20 +941,23 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
     with db_connection() as connection:
         ensure_schema(connection)
         with connection.cursor() as cursor:
-            cursor.execute("SELECT student_id, name, email, course, year_level, block, descriptor_json, photo FROM students ORDER BY name")
+            cursor.execute("SELECT student_id, name, first_name, middle_name, last_name, email, course, year_level, block, descriptor_json, photo FROM students ORDER BY name")
             students = [
-                {"studentId": row["student_id"], "name": row["name"], "email": row["email"],
+                {"studentId": row["student_id"], "name": row["name"],
+                 "firstName": row["first_name"], "middleName": row["middle_name"], "lastName": row["last_name"],
+                 "email": row["email"],
                  "course": row["course"], "yearLevel": row["year_level"], "block": row["block"],
                  "descriptor": json.loads(row["descriptor_json"]), "photo": row["photo"]}
                 for row in cursor.fetchall()
             ]
             cursor.execute("""SELECT id, student_id, student_name, DATE_FORMAT(attendance_date, '%Y-%m-%d') AS date,
-                              section, attendance_time, status, time_out FROM attendance_records
-                              ORDER BY attendance_date DESC, created_at DESC""")
+                             section, attendance_time, status, time_out, attendance_source FROM attendance_records
+                             ORDER BY attendance_date DESC, created_at DESC""")
             records = [
                 {"id": row["id"], "studentId": row["student_id"], "name": row["student_name"],
                  "date": row["date"], "section": row["section"], "time": row["attendance_time"],
-                 "status": row.get("status") or "Present", "timeOut": row.get("time_out")}
+                 "status": row.get("status") or "Present", "timeOut": row.get("time_out"),
+                 "attendanceSource": row.get("attendance_source")}
                 for row in cursor.fetchall()
             ]
             cursor.execute("SELECT course, year_level, block FROM class_groups ORDER BY course, year_level, block")
@@ -927,7 +973,7 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                               TIME_FORMAT(late_end, '%H:%i') AS late_end,
                               TIME_FORMAT(time_out, '%H:%i') AS time_out,
                               TIME_FORMAT(time_out_end, '%H:%i') AS time_out_end,
-                              attendance_mode, attendance_ended
+                              attendance_mode, attendance_ended, roster_scope
                               FROM attendance_sessions
                               ORDER BY session_date DESC, section""")
             sessions = []
@@ -945,6 +991,7 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                     gracePeriodMinutes=row["grace_period_minutes"],
                     lateThresholdMinutes=row["late_threshold_minutes"],
                     mode=mode,
+                    rosterScope=row.get("roster_scope") or "class",
                     ended=bool(mode == "manual" and row["attendance_ended"]),
                 )
                 if session.mode == "manual":
@@ -952,6 +999,7 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                         "id": row["id"],
                         "section": row["section"],
                         "date": row["date"],
+                        "rosterScope": session.rosterScope,
                         "requiredTimeIn": row["required_time_in"] or "00:00",
                         "timeInStart": row["required_time_in"] or "00:00",
                         "timeInEnd": row["time_in_end"] or "23:59",
@@ -964,6 +1012,7 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                     "id": row["id"],
                     "section": row["section"],
                     "date": row["date"],
+                    "rosterScope": session.rosterScope,
                     "requiredTimeIn": time_in_start,
                     "timeInStart": time_in_start,
                     "timeInEnd": time_in_end,
@@ -994,11 +1043,10 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                 seen_classes.add(key)
                 store.classes.append(ClassGroup(course=student.course, yearLevel=student.yearLevel, block=student.block))
     student_ids: set[str] = set()
-    student_names: set[str] = set()
     student_emails: set[str] = set()
     for student in store.students:
         student_id = " ".join(student.studentId.split()).casefold()
-        student_name = " ".join(student.name.split()).casefold()
+        student_name = " ".join(student.name.split())
         email = student.email.strip().casefold()
         if any(character.isdigit() for character in student.name):
             raise HTTPException(status_code=422, detail="Student names cannot contain numbers.")
@@ -1006,21 +1054,36 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
             raise HTTPException(status_code=422, detail="Every student needs a name and student ID.")
         if student_id in student_ids:
             raise HTTPException(status_code=422, detail="Duplicate student IDs are not allowed.")
-        if student_name in student_names:
-            raise HTTPException(status_code=422, detail="Duplicate student names are not allowed.")
         if email and email in student_emails:
             raise HTTPException(status_code=422, detail="Duplicate email addresses are not allowed.")
         student_ids.add(student_id)
-        student_names.add(student_name)
         if email:
             student_emails.add(email)
+    record_ids: set[str] = set()
+    attendance_keys: set[tuple[str, str, str]] = set()
     for record in store.records:
-        if record.studentId.casefold() not in student_ids:
+        record_id = record.id.strip().casefold()
+        student_id = " ".join(record.studentId.split()).casefold()
+        section = " ".join(record.section.split()).casefold()
+        attendance_key = (student_id, record.date, section)
+        try:
+            is_valid_date = datetime.strptime(record.date, "%Y-%m-%d").date().isoformat() == record.date
+        except ValueError:
+            is_valid_date = False
+        if not record_id or record_id in record_ids:
+            raise HTTPException(status_code=422, detail="Attendance record IDs must be unique and non-empty.")
+        if not is_valid_date or not section:
+            raise HTTPException(status_code=422, detail="Each attendance record needs a valid date and class.")
+        if attendance_key in attendance_keys:
+            raise HTTPException(status_code=422, detail="A student can only have one attendance record per class and day.")
+        if student_id not in student_ids:
             raise HTTPException(status_code=422, detail="Attendance records must belong to an enrolled student.")
         if parse_clock_time(record.time) is None:
             raise HTTPException(status_code=422, detail="Each attendance record needs a valid time-in.")
         if record.timeOut and parse_clock_time(record.timeOut) is None:
             raise HTTPException(status_code=422, detail="Attendance record time-out must be a valid time.")
+        record_ids.add(record_id)
+        attendance_keys.add(attendance_key)
     class_keys = {(item.course.strip().casefold(), item.yearLevel, item.block.strip().casefold()) for item in store.classes}
     if len(class_keys) != len(store.classes):
         raise HTTPException(status_code=422, detail="Duplicate classes are not allowed.")
@@ -1028,10 +1091,26 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
     if not student_classes.issubset(class_keys):
         raise HTTPException(status_code=422, detail="Every student must be assigned to an existing class.")
     session_keys: set[tuple[str, str]] = set()
+    session_ids: set[str] = set()
+    all_roster_session_dates: set[str] = set()
     for session in store.sessions:
         key = (session.section.strip().casefold(), session.date)
+        session_id = session.id.strip().casefold()
         if key in session_keys:
             raise HTTPException(status_code=422, detail="Duplicate attendance sessions are not allowed.")
+        if session_id in session_ids:
+            raise HTTPException(status_code=422, detail="Attendance session IDs must be unique.")
+        try:
+            is_valid_session_date = datetime.strptime(session.date, "%Y-%m-%d").date().isoformat() == session.date
+        except ValueError:
+            is_valid_session_date = False
+        if not is_valid_session_date:
+            raise HTTPException(status_code=422, detail="Each attendance session needs a valid date.")
+        session_ids.add(session_id)
+        if session.rosterScope == "all":
+            if session.date in all_roster_session_dates:
+                raise HTTPException(status_code=422, detail="Only one all-students attendance session is allowed per date.")
+            all_roster_session_dates.add(session.date)
         if session.mode == "manual":
             session_keys.add(key)
             continue
@@ -1073,7 +1152,7 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
     with db_connection() as connection:
         ensure_schema(connection)
         with connection.cursor() as cursor:
-            cursor.execute("DELETE FROM attendance_records")
+            cursor.execute("DELETE FROM attendance_records WHERE attendance_source <> 'auto_absent'")
             cursor.execute("DELETE FROM attendance_sessions")
             cursor.execute("DELETE FROM students")
             cursor.execute("DELETE FROM class_groups")
@@ -1085,18 +1164,23 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
             if store.students:
                 cursor.executemany(
                     """INSERT INTO students
-                    (student_id, name, email, course, year_level, block, descriptor_json, photo)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-                    [(s.studentId, s.name, s.email, s.course, s.yearLevel, s.block,
+                    (student_id, name, first_name, middle_name, last_name, email, course, year_level, block, descriptor_json, photo)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                    [(s.studentId, s.name, s.firstName, s.middleName, s.lastName, s.email, s.course, s.yearLevel, s.block,
                       json.dumps(s.descriptor), s.photo) for s in store.students],
                 )
+            cursor.execute("""
+                DELETE FROM attendance_records
+                WHERE attendance_source = 'auto_absent'
+                  AND student_id NOT IN (SELECT student_id FROM students)
+            """)
             if store.sessions:
                 cursor.executemany(
                     """INSERT INTO attendance_sessions
                     (id, section, session_date, required_time_in, time_in_end,
                      late_start, late_end, grace_period_minutes, late_threshold_minutes,
-                     time_out, time_out_end, attendance_mode, attendance_ended)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                     time_out, time_out_end, attendance_mode, attendance_ended, roster_scope)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     [
                         (
                             session.id,
@@ -1115,11 +1199,23 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                             format_time_hhmm(session.timeOutEnd) if session.timeOutEnd else None,
                             "manual" if session.mode == "manual" else "timed",
                             bool(session.mode == "manual" and session.ended),
+                            session.rosterScope,
                         )
                         for session in store.sessions
                     ],
                 )
-            if store.records:
+            records_to_insert = []
+            for record in store.records:
+                if record.attendanceSource == "auto_absent" and record.status == "Absent":
+                    continue
+                cursor.execute(
+                    """DELETE FROM attendance_records
+                       WHERE attendance_source = 'auto_absent'
+                         AND student_id = %s AND attendance_date = %s AND section = %s""",
+                    (record.studentId, record.date, record.section),
+                )
+                records_to_insert.append(record)
+            if records_to_insert:
                 cursor.executemany(
                     """INSERT INTO attendance_records
                     (id, student_id, student_name, attendance_date, section, attendance_time, status, time_out)
@@ -1135,13 +1231,221 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                             resolve_record_status(r, sessions_by_key),
                             (r.timeOut or None),
                         )
-                        for r in store.records
+                        for r in records_to_insert
                     ],
                 )
     return {
         "students": len(store.students),
         "records": len(store.records),
         "sessions": len(store.sessions),
+    }
+
+
+def send_absence_email(job: dict[str, Any]) -> None:
+    email_config = {
+        "service_id": os.getenv("STUDENT_ATTENDANCE_EMAILJS_SERVICE_ID", "service_sa8ojt8"),
+        "template_id": os.getenv("STUDENT_ATTENDANCE_EMAILJS_TEMPLATE_ID", "template_986zsnj"),
+        "user_id": os.getenv("STUDENT_ATTENDANCE_EMAILJS_PUBLIC_KEY", "8nvcTW8G6rXutzdGM"),
+        "template_params": {
+            "to_email": job["email"],
+            "recipient_email": job["email"],
+            "student_email": job["email"],
+            "email": job["email"],
+            "to_name": job["name"],
+            "student_name": job["name"],
+            "student_id": job["student_id"],
+            "class_name": job["section"],
+            "attendance_date": datetime.strptime(job["date"], "%Y-%m-%d").strftime("%B %d, %Y").replace(" 0", " "),
+            "attendance_time": job["attendance_time"],
+            "attendance_status": "Absent",
+            "status_color": "#b42318",
+            "status_background": "#ffebe9",
+            "message": "No check-in was recorded before the scheduled attendance window closed, so you were marked absent.",
+            "attendance_photo": "",
+        },
+    }
+    request = Request(
+        "https://api.emailjs.com/api/v1.0/email/send",
+        data=json.dumps(email_config).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "Origin": "https://lewis-see.vercel.app",
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=10) as response:
+            if response.status < 200 or response.status >= 300:
+                raise RuntimeError(f"EmailJS returned HTTP {response.status}.")
+    except HTTPError as error:
+        raise RuntimeError(f"EmailJS returned HTTP {error.code}.") from error
+    except URLError as error:
+        raise RuntimeError("EmailJS could not be reached.") from error
+
+
+@app.post("/attendance/absences")
+def process_scheduled_absences(
+    authorization: str | None = Header(default=None),
+) -> dict[str, Any]:
+    cron_secret = os.getenv("CRON_SECRET", "")
+    if len(cron_secret) < 32:
+        raise HTTPException(status_code=503, detail="CRON_SECRET must be configured with at least 32 characters.")
+    if not secrets.compare_digest(authorization or "", f"Bearer {cron_secret}"):
+        raise HTTPException(status_code=401, detail="Unauthorized.")
+
+    created = 0
+    queued = 0
+    without_email = 0
+    email_attempted = 0
+    email_sent = 0
+    email_failed = 0
+    now = datetime.now(MANILA_TZ)
+    session_date = now.date().isoformat()
+    current_time = now.strftime("%H:%M:%S")
+
+    with db_connection() as connection:
+        ensure_schema(connection)
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT GET_LOCK(%s, 0) AS acquired", ("lewissee-scheduled-absences",))
+            acquired = cursor.fetchone()["acquired"]
+            if acquired is None:
+                raise HTTPException(status_code=503, detail="Could not acquire the scheduled absence processing lock.")
+            if int(acquired) != 1:
+                return {"skipped": "Another absence job is already running."}
+
+            try:
+                cursor.execute(
+                    """SELECT section, roster_scope,
+                              DATE_FORMAT(session_date, '%%Y-%%m-%%d') AS session_date,
+                              TIME_FORMAT(COALESCE(late_end, time_in_end), '%%H:%%i:%%s') AS attendance_end
+                       FROM attendance_sessions
+                       WHERE session_date = %s
+                         AND attendance_mode = 'timed'
+                         AND COALESCE(late_end, time_in_end) IS NOT NULL
+                         AND COALESCE(late_end, time_in_end) <= %s""",
+                    (session_date, current_time),
+                )
+                sessions = cursor.fetchall()
+
+                for session in sessions:
+                    if session["roster_scope"] == "all":
+                        cursor.execute(
+                            """SELECT s.student_id, s.name, s.email,
+                                      CONCAT(TRIM(s.course), ' ', s.year_level, TRIM(s.block)) AS section
+                               FROM students s
+                               WHERE NOT EXISTS (
+                                 SELECT 1 FROM attendance_sessions class_session
+                                 WHERE class_session.session_date = %s
+                                   AND class_session.roster_scope = 'class'
+                                   AND LOWER(TRIM(class_session.section)) =
+                                       LOWER(CONCAT(TRIM(s.course), ' ', s.year_level, TRIM(s.block)))
+                               )
+                                 AND NOT EXISTS (
+                                   SELECT 1 FROM attendance_records r
+                                   WHERE r.student_id = s.student_id
+                                     AND r.attendance_date = %s
+                                     AND LOWER(TRIM(r.section)) =
+                                         LOWER(CONCAT(TRIM(s.course), ' ', s.year_level, TRIM(s.block)))
+                                 )""",
+                            (session_date, session_date),
+                        )
+                    else:
+                        cursor.execute(
+                            """SELECT s.student_id, s.name, s.email, %s AS section
+                               FROM students s
+                               WHERE LOWER(CONCAT(TRIM(s.course), ' ', s.year_level, TRIM(s.block))) = LOWER(TRIM(%s))
+                                 AND NOT EXISTS (
+                                   SELECT 1 FROM attendance_records r
+                                   WHERE r.student_id = s.student_id
+                                     AND r.attendance_date = %s
+                                     AND r.section = %s
+                                 )""",
+                            (session["section"], session["section"], session_date, session["section"]),
+                        )
+                    for student in cursor.fetchall():
+                        record_id = str(uuid.uuid4())
+                        cursor.execute(
+                            """INSERT IGNORE INTO attendance_records
+                               (id, student_id, student_name, attendance_date, section, attendance_time, status, attendance_source)
+                               VALUES (%s, %s, %s, %s, %s, %s, 'Absent', 'auto_absent')""",
+                            (
+                                record_id,
+                                student["student_id"],
+                                student["name"],
+                                session_date,
+                                student["section"],
+                                session["attendance_end"],
+                            ),
+                        )
+                        if cursor.rowcount != 1:
+                            continue
+                        created += 1
+                        email = str(student.get("email") or "").strip()
+                        if not email:
+                            without_email += 1
+                            continue
+                        cursor.execute(
+                            """INSERT INTO attendance_email_outbox (record_id, recipient_email)
+                               VALUES (%s, %s)""",
+                            (record_id, email),
+                        )
+                        queued += 1
+
+                connection.commit()
+                cursor.execute(
+                    """SELECT o.record_id, o.recipient_email AS email, o.attempts,
+                              r.student_id, r.student_name AS name, r.section,
+                              DATE_FORMAT(r.attendance_date, '%Y-%m-%d') AS date,
+                              r.attendance_time
+                       FROM attendance_email_outbox o
+                       JOIN attendance_records r ON r.id = o.record_id
+                       WHERE o.status = 'pending'
+                         AND o.attempts < 5
+                         AND (o.next_attempt_at IS NULL OR o.next_attempt_at <= UTC_TIMESTAMP())
+                       ORDER BY o.created_at
+                       LIMIT 25"""
+                )
+                for job in cursor.fetchall():
+                    email_attempted += 1
+                    try:
+                        send_absence_email(job)
+                        cursor.execute(
+                            """UPDATE attendance_email_outbox
+                               SET status = 'sent', sent_at = UTC_TIMESTAMP(), last_error = NULL
+                               WHERE record_id = %s AND status = 'pending'""",
+                            (job["record_id"],),
+                        )
+                        email_sent += 1
+                    except Exception as error:
+                        attempts = int(job["attempts"]) + 1
+                        next_status = "failed" if attempts >= 5 else "pending"
+                        cursor.execute(
+                            """UPDATE attendance_email_outbox
+                               SET attempts = %s, status = %s,
+                                   next_attempt_at = IF(%s = 'pending', DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 MINUTE), NULL),
+                                   last_error = %s
+                               WHERE record_id = %s AND status = 'pending'""",
+                            (attempts, next_status, next_status, str(error)[:1000], job["record_id"]),
+                        )
+                        print(
+                            "Scheduled absence email delivery failed:",
+                            {"record_id": job["record_id"], "attempts": attempts, "error": str(error)},
+                        )
+                        email_failed += 1
+                    connection.commit()
+            finally:
+                cursor.execute("SELECT RELEASE_LOCK(%s)", ("lewissee-scheduled-absences",))
+
+    return {
+        "date": session_date,
+        "created": created,
+        "queued": queued,
+        "withoutEmail": without_email,
+        "emails": {
+            "attempted": email_attempted,
+            "sent": email_sent,
+            "failed": email_failed,
+        },
     }
 
 

@@ -9,6 +9,12 @@ import {
   ADMIN_INSTRUCTOR_EMAILJS,
   INSTRUCTOR_REQUEST_EMAILJS,
 } from "../src/api/emailConfig.js";
+import {
+  acquireInstructorSession,
+  getInstructorSessionClaims,
+  refreshInstructorSession,
+  releaseInstructorSession,
+} from "./_lib/instructorSession.js";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const respond = (res, code, body) => res.status(code).json(body);
@@ -560,6 +566,20 @@ async function handleAdmin(req, res, path, pool) {
 
 async function handleInstructorAuth(req, res, action, pool) {
   const body = getBody(req);
+  if (action === "session" && req.method === "POST") {
+    const claims = getInstructorSessionClaims(req);
+    if (!claims || !await refreshInstructorSession(pool, claims.sub, claims.sid)) {
+      return respond(res, 401, { message: "Your instructor session is no longer active. Please sign in again." });
+    }
+    return respond(res, 200, { active: true });
+  }
+
+  if (action === "logout" && req.method === "POST") {
+    const claims = getInstructorSessionClaims(req);
+    if (claims) await releaseInstructorSession(pool, claims.sub, claims.sid);
+    return respond(res, 200, { signedOut: true });
+  }
+
   if (action === "register" && req.method === "POST") {
     const name = typeof body.name === "string" ? body.name.trim().replace(/\s+/g, " ") : "";
     const email = typeof body.email === "string" ? body.email.trim().toLowerCase() : "";
@@ -637,9 +657,18 @@ async function handleInstructorAuth(req, res, action, pool) {
       return respond(res, 403, { message: messages[instructor.status] || "Your account cannot sign in yet." });
     }
 
+    const jwtSecret = getJwtSecret();
+    const sessionId = randomUUID();
+    const acquired = await acquireInstructorSession(pool, instructor.uid, sessionId);
+    if (!acquired) {
+      return respond(res, 409, {
+        message: "This instructor account is already in use. Sign out from the other session and try again.",
+      });
+    }
+
     const token = jwt.sign(
-      { sub: instructor.uid, role: "instructor" },
-      getJwtSecret(),
+      { sub: instructor.uid, role: "instructor", sid: sessionId },
+      jwtSecret,
       { algorithm: "HS256", expiresIn: "8h" },
     );
     return respond(res, 200, {

@@ -219,6 +219,8 @@ export const determineAttendanceStatus = (
 export const statusForRecord = (record, sessions = []) => {
   const session = sessions.find(
     (item) => item.section === record.section && item.date === record.date,
+  ) || sessions.find(
+    (item) => item.date === record.date && item.rosterScope === "all",
   );
   if (!session) return record.status || "Present";
   if (session.mode === "manual") return "Present";

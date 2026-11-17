@@ -4,6 +4,7 @@ import AccessShell from "../components/AccessShell";
 import LewisSeeLogo from "../components/LewisSeeLogo";
 import { clearAdminSession } from "../api/adminApi";
 import { getInstructorApiUrl } from "../api/apiRoot";
+import { releaseInstructorSession } from "../api/instructorSession";
 import { useAuth } from "../context/AuthContext";
 
 const apiErrorMessage = (data, fallback) => {
@@ -64,6 +65,7 @@ function PasswordVisibilityButton({ visible, onClick, fieldName }) {
 }
 
 function clearInstructorSession() {
+  releaseInstructorSession();
   localStorage.removeItem("instructor-token");
   localStorage.removeItem("instructor-account");
 }

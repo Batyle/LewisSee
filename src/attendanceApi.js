@@ -20,6 +20,8 @@ const REQUEST_TIMEOUT_MS = 20000;
 const INITIAL_RETRY_DELAY_MS = 1000;
 const MAX_RETRY_DELAY_MS = 30000;
 const RETRYABLE_STATUSES = new Set([408, 429]);
+const getSessionToken = () =>
+  localStorage.getItem("admin-session-token") || localStorage.getItem("instructor-token");
 
 const makeError = (message, retryable = false) => {
   const error = new Error(message);
@@ -82,7 +84,10 @@ const request = async (method, body, { signal, onRetry } = {}) => {
         try {
           response = await fetch(url, {
             method,
-            headers: body ? { "Content-Type": "application/json" } : undefined,
+            headers: {
+              ...(body ? { "Content-Type": "application/json" } : {}),
+              ...(getSessionToken() ? { Authorization: `Bearer ${getSessionToken()}` } : {}),
+            },
             body: body ? JSON.stringify(body) : undefined,
             signal: controller.signal,
           });

@@ -24,6 +24,7 @@ import {
   nowManilaTime,
   parseClockToMinutes,
   sessionTimeRanges,
+  statusForRecord,
   todayManila,
 } from "./attendancePolicy";
 import { emailErrorMessage, sendAttendanceEmail } from "./api/studentAttendanceEmail";
@@ -48,6 +49,45 @@ const DEFAULT_CLASSES = [
   { course: "BSCS", yearLevel: 2, block: "A" },
 ];
 const today = () => todayManila();
+const formatStudentName = ({ firstName, middleName, lastName }) => {
+  const first = String(firstName || "").trim().replace(/\s+/g, " ");
+  const middle = String(middleName || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .split(" ")
+    .filter(Boolean)
+    .map((part) => `${part.replace(/\./g, "").charAt(0).toUpperCase()}.`)
+    .join(" ");
+  const last = String(lastName || "").trim().replace(/\s+/g, " ");
+  return [first, middle, last].filter(Boolean).join(" ");
+};
+const splitStudentName = (student) => {
+  if (student.firstName || student.middleName || student.lastName) {
+    return {
+      firstName: student.firstName || "",
+      middleName: student.middleName || "",
+      lastName: student.lastName || "",
+    };
+  }
+  const parts = String(student.name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2)
+    return { firstName: parts[0] || "", middleName: "", lastName: "" };
+  const middleInitialIndex = parts.findIndex(
+    (part, index) => index > 0 && /^[A-Za-z]\.?$/.test(part),
+  );
+  if (middleInitialIndex === 1) {
+    return {
+      firstName: parts[0],
+      middleName: parts[1],
+      lastName: parts.slice(2).join(" "),
+    };
+  }
+  return {
+    firstName: parts[0],
+    middleName: parts.length > 2 ? parts.slice(1, -1).join(" ") : "",
+    lastName: parts[parts.length - 1],
+  };
+};
 const isValidDate = (value) => {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
   const parsed = new Date(`${value}T00:00:00.000Z`);
@@ -245,7 +285,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [message, setMessage] = useState("Preparing scanner…"),
     [faces, setFaces] = useState(0),
     [match, setMatch] = useState(null);
-  const [form, setForm] = useState({ name: "", ...studentIdFields(), email: "", course: "BSIT", yearLevel: "3", block: "A" }),
+  const [form, setForm] = useState({ firstName: "", middleName: "", lastName: "", ...studentIdFields(), email: "", course: "BSIT", yearLevel: "3", block: "A" }),
     [file, setFile] = useState(null),
     [filePreview, setFilePreview] = useState(""),
     [notice, setNotice] = useState(""),
@@ -260,11 +300,12 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     [studentYearFilter, setStudentYearFilter] = useState(""),
     [studentBlockFilter, setStudentBlockFilter] = useState(""),
     [studentSort, setStudentSort] = useState("name"),
+    [attendanceSort, setAttendanceSort] = useState("present"),
     [enrolling, setEnrolling] = useState(false),
     [isEnrollmentOpen, setEnrollmentOpen] = useState(false);
   const [editingId, setEditingId] = useState(null),
     [historyEditingId, setHistoryEditingId] = useState(null),
-    [editForm, setEditForm] = useState({ name: "", studentId: "", email: "", course: "BSIT", yearLevel: "3", block: "A" }),
+    [editForm, setEditForm] = useState({ firstName: "", middleName: "", lastName: "", studentId: "", email: "", course: "BSIT", yearLevel: "3", block: "A" }),
     [editFile, setEditFile] = useState(null),
     [editFilePreview, setEditFilePreview] = useState(""),
     [savingEdit, setSavingEdit] = useState(false);
@@ -285,6 +326,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   const [accessError, setAccessError] = useState(""),
     [cloudLoaded, setCloudLoaded] = useState(false),
     [startupDismissed, setStartupDismissed] = useState(false);
+  const isAdmin = staffUser?.role === "admin";
   const debugMode = new URLSearchParams(location.search).get("debug") === "1";
   const section = classLabel({ course, yearLevel, block });
   const activeClasses = classes.length ? classes : DEFAULT_CLASSES;
@@ -542,6 +584,18 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       ...nextSession,
       date: nextSession.date && nextSession.date > liveDate ? nextSession.date : liveDate,
     };
+    if (
+      normalized.rosterScope === "all" &&
+      sessionsRef.current.some(
+        (item) =>
+          item.rosterScope === "all" &&
+          item.date === normalized.date &&
+          item.section !== normalized.section,
+      )
+    ) {
+      setNotice("Only one all-students attendance session can be saved per date.");
+      return false;
+    }
     if (normalized.date === liveDate) {
       setDate(liveDate);
       scanContextRef.current = {
@@ -567,23 +621,30 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       }
       return [...all, normalized];
     });
-    const ranges = sessionTimeRanges(normalized);
+    const updatedSessions = [
+      ...sessionsRef.current.filter(
+        (item) => item.section !== normalized.section || item.date !== normalized.date,
+      ),
+      normalized,
+    ];
+    sessionsRef.current = updatedSessions;
     setRecords((all) =>
       all.map((record) => {
-        if (record.section !== normalized.section || record.date !== normalized.date) return record;
-        if (normalized.mode === "manual") return { ...record, status: "Present" };
-        return {
-          ...record,
-          status: determineAttendanceStatus(
-            record.time,
-            ranges.timeInStart,
-            ranges.timeInEnd,
-            ranges.lateStart,
-            ranges.lateEnd,
-          ),
-        };
+        if (record.date !== normalized.date) return record;
+        if (
+          record.section !== normalized.section &&
+          normalized.rosterScope !== "all" &&
+          !updatedSessions.some(
+            (item) =>
+              item.section === record.section &&
+              item.date === record.date &&
+              item.rosterScope !== "all",
+          )
+        ) return record;
+        return { ...record, status: statusForRecord(record, updatedSessions) };
       }),
     );
+    return true;
   }, []);
   const toggleManualAttendance = useCallback(() => {
     const currentSession = activeSessionRef.current;
@@ -603,9 +664,19 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       scanDate = synced.liveDate;
       currentSession = synced.session || activeSessionRef.current;
     }
+    const allRoster = currentSession?.rosterScope === "all";
+    const selectedSession = currentSession;
+    if (allRoster) {
+      currentSession = sessionsRef.current.find(
+        (item) =>
+          item.date === scanDate &&
+          item.section === classLabel(student) &&
+          item.rosterScope !== "all",
+      ) || currentSession;
+    }
     if (
       !isAttendancePolicyReady(currentSession) ||
-      currentSession.section !== scanSection ||
+      selectedSession?.section !== scanSection ||
       currentSession.date !== scanDate ||
       scanDate !== liveDate
     )
@@ -613,10 +684,12 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     const scanTime = nowManilaTime();
     const phase = liveAttendancePhaseAt(scanTime, currentSession);
     if (!phase) return;
+    const recordSection =
+      allRoster ? classLabel(student) : scanSection;
     const attendanceKey = JSON.stringify([
       String(student.studentId || "").trim().toLowerCase(),
       scanDate,
-      String(scanSection || "").trim().toLowerCase(),
+      String(recordSection || "").trim().toLowerCase(),
     ]);
     const existingRecord = scanRecords.find(
       (record) => attendanceIdentity(record) === attendanceKey,
@@ -642,7 +715,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       studentId: student.studentId,
       name: student.name,
       date: scanDate,
-      section: scanSection,
+      section: recordSection,
       time: scanTime,
       status: phase,
       timeOut: null,
@@ -737,9 +810,11 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           return;
         const detected = await detect(frame.current);
         const activeClass = selectedClass.current;
-        const classRoster = roster.current.filter((student) =>
-          belongsToClass(student, activeClass.course, activeClass.yearLevel, activeClass.block),
-        );
+        const classRoster = activeSessionRef.current?.rosterScope === "all"
+          ? roster.current
+          : roster.current.filter((student) =>
+              belongsToClass(student, activeClass.course, activeClass.yearLevel, activeClass.block),
+            );
         const matches = detected.map((face) => {
           let best,
             score = Infinity;
@@ -780,6 +855,15 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             section: scanSection,
           };
         }
+        const selectedSession = currentSession;
+        if (found && currentSession?.rosterScope === "all") {
+          currentSession = sessionsRef.current.find(
+            (item) =>
+              item.date === scanDate &&
+              item.section === classLabel(found.student) &&
+              item.rosterScope !== "all",
+          ) || currentSession;
+        }
         const policyReady = isAttendancePolicyReady(currentSession);
         const selectedDateIsToday = scanDate === liveDate;
         const attendancePhase =
@@ -792,7 +876,11 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           (record) =>
             record.studentId === found.student.studentId &&
             record.date === scanDate &&
-            record.section === scanSection,
+            record.section === (
+              selectedSession?.rosterScope === "all"
+                ? classLabel(found.student)
+                : scanSection
+            ),
         );
         const timeOutUnavailable =
           Boolean(found) &&
@@ -1028,7 +1116,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   };
   const enroll = async (event) => {
     event.preventDefault();
-    if (/\d/.test(form.name)) return setNotice("Names cannot contain numbers.");
+    if ([form.firstName, form.middleName, form.lastName].some((value) => /\d/.test(value)))
+      return setNotice("Names cannot contain numbers.");
     if (!file) return setNotice("Choose a reference portrait.");
     if (!isValidStudentId(form))
       return setNotice("Enter a 4-digit year and a 3-digit student number.");
@@ -1050,9 +1139,13 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       const result = await detect(canvas);
       if (result.length !== 1)
         throw new Error("The portrait must contain exactly one face.");
-      const nextName = form.name.trim();
+      const firstName = form.firstName.trim().replace(/\s+/g, " ");
+      const middleName = form.middleName.trim().replace(/\s+/g, " ");
+      const lastName = form.lastName.trim().replace(/\s+/g, " ");
+      const nextName = formatStudentName({ firstName, middleName, lastName });
       const nextEmail = form.email.trim();
-      if (!nextName || !nextId) throw new Error("Full name and student ID are required.");
+      if (!firstName || !middleName || !lastName || !nextId)
+        throw new Error("First, middle, and last names and student ID are required.");
       if (students.some((s) => normalize(s.studentId) === normalize(nextId)))
         throw new Error("That student ID is already enrolled.");
       if (students.some((s) => normalize(s.name) === normalize(nextName)))
@@ -1065,6 +1158,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         {
           ...form,
           name: nextName,
+          firstName,
+          middleName,
+          lastName,
           studentId: nextId,
           email: nextEmail,
           yearLevel: String(form.yearLevel),
@@ -1074,7 +1170,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         },
       ]);
       selectPortraitFile(null, setFile, setFilePreview, filePreviewUrl);
-      setForm({ name: "", ...studentIdFields(), email: "", course, yearLevel, block });
+      setForm({ firstName: "", middleName: "", lastName: "", ...studentIdFields(), email: "", course, yearLevel, block });
       setNotice("Student enrolled.");
       setEnrollmentOpen(false);
     } catch (cause) {
@@ -1089,7 +1185,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     selectPortraitFile(null, setEditFile, setEditFilePreview, editFilePreviewUrl);
     setEditingId(student.studentId);
     setEditForm({
-      name: student.name,
+      ...splitStudentName(student),
       ...studentIdFields(student.studentId),
       email: student.email || "",
       course: student.course || "BSIT",
@@ -1102,15 +1198,20 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   const saveEdit = async (event) => {
     event.preventDefault();
     if (!students.some((student) => student.studentId === editingId)) return;
-    if (/\d/.test(editForm.name)) return setNotice("Names cannot contain numbers.");
+    if ([editForm.firstName, editForm.middleName, editForm.lastName].some((value) => /\d/.test(value)))
+      return setNotice("Names cannot contain numbers.");
     if (!isValidStudentId(editForm))
       return setNotice("Enter a 4-digit year and a 3-digit student number.");
     setSavingEdit(true);
     try {
       const nextId = formatStudentId(editForm);
-      const nextName = editForm.name.trim();
+      const firstName = editForm.firstName.trim().replace(/\s+/g, " ");
+      const middleName = editForm.middleName.trim().replace(/\s+/g, " ");
+      const lastName = editForm.lastName.trim().replace(/\s+/g, " ");
+      const nextName = formatStudentName({ firstName, middleName, lastName });
       const nextEmail = editForm.email.trim();
-      if (!nextName || !nextId) throw new Error("Full name and student ID are required.");
+      if (!firstName || !middleName || !lastName || !nextId)
+        throw new Error("First, middle, and last names and student ID are required.");
       if (
         students.some(
           (student) =>
@@ -1125,6 +1226,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         throw new Error("That email address is already enrolled.");
       let changes = {
         name: nextName,
+        firstName,
+        middleName,
+        lastName,
         studentId: nextId,
         email: nextEmail,
         course: editForm.course,
@@ -1187,6 +1291,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
   };
   const addClass = (event) => {
     event.preventDefault();
+    if (!isAdmin) return setNotice("Only an administrator can add courses or classes.");
     const next = {
       course: newClass.course.trim().toUpperCase(),
       yearLevel: String(newClass.yearLevel).trim(),
@@ -1203,6 +1308,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     setNotice(`${classLabel(next)} was added.`);
   };
   const deleteClass = (item) => {
+    if (!isAdmin) return setNotice("Only an administrator can remove courses or classes.");
     const assigned = students.filter((student) => belongsToClass(student, item.course, item.yearLevel, item.block));
     if (assigned.length)
       return setNotice(`Move or delete the ${assigned.length} student(s) assigned to ${classLabel(item)} before deleting it.`);
@@ -1321,8 +1427,11 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     });
   }, [historySearch, historySectionFilter, historySort, records]);
   const attendance = useMemo(
-    () => records.filter((r) => r.date === date && r.section === section),
-    [date, records, section],
+    () => records.filter((r) =>
+      r.date === date &&
+      (activeSession?.rosterScope === "all" || r.section === section),
+    ),
+    [activeSession, date, records, section],
   );
   const studentsForClass = useMemo(
     () => students.filter((student) => belongsToClass(student, course, yearLevel, block)),
@@ -1375,6 +1484,74 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       return left.name.localeCompare(right.name);
     });
   }, [studentBlockFilter, studentCourseFilter, studentSearch, studentSort, studentYearFilter, students]);
+  const rankedStudents = useMemo(() => {
+    const todayDate = today();
+    const datesBySection = new Map();
+    const addSessionDate = (sectionName, dateValue) => {
+      if (!sectionName || !dateValue || dateValue > todayDate) return;
+      const key = String(sectionName).trim().toLocaleLowerCase();
+      if (!datesBySection.has(key)) datesBySection.set(key, new Set());
+      datesBySection.get(key).add(dateValue);
+    };
+
+    sessions.forEach((session) => addSessionDate(session.section, session.date));
+    sessions
+      .filter((session) => session.rosterScope === "all")
+      .forEach((session) => displayedStudents.forEach((student) =>
+        addSessionDate(classLabel(student), session.date),
+      ));
+    records.forEach((record) => addSessionDate(record.section, record.date));
+
+    const ranked = displayedStudents.map((student) => {
+        const sectionName = classLabel(student);
+        const sectionKey = sectionName.toLocaleLowerCase();
+        const studentRecords = records.filter((record) =>
+          record.studentId === student.studentId &&
+          String(record.section || "").trim().toLocaleLowerCase() === sectionKey &&
+          record.date <= todayDate,
+        );
+        const presentCount = studentRecords.filter((record) =>
+          String(record.status || "Present").toLocaleLowerCase() === "present",
+        ).length;
+        const lateCount = studentRecords.filter((record) =>
+          String(record.status || "").toLocaleLowerCase() === "late",
+        ).length;
+        const attendedCount = presentCount + lateCount;
+        const totalSessions = datesBySection.get(sectionKey)?.size || 0;
+        const absentCount = Math.max(0, totalSessions - attendedCount);
+
+        return {
+          ...student,
+          sectionName,
+          presentCount,
+          lateCount,
+          attendedCount,
+          absentCount,
+          totalSessions,
+          attendanceRate: totalSessions ? attendedCount / totalSessions : 0,
+        };
+      });
+
+    return ranked.sort((left, right) => {
+      if (attendanceSort === "absent") {
+        return right.absentCount - left.absentCount || left.name.localeCompare(right.name);
+      }
+      if (attendanceSort === "name") return left.name.localeCompare(right.name);
+      if (attendanceSort === "rate") {
+        return right.attendanceRate - left.attendanceRate ||
+          right.attendedCount - left.attendedCount ||
+          left.name.localeCompare(right.name);
+      }
+      return right.attendedCount - left.attendedCount ||
+        left.absentCount - right.absentCount ||
+        left.name.localeCompare(right.name);
+    });
+  }, [
+    attendanceSort,
+    displayedStudents,
+    records,
+    sessions,
+  ]);
   if (!startupDismissed && !cloudLoaded) {
     return (
       <LoadingScreen
@@ -1466,8 +1643,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         {[
           ["scan", "Scanner"],
           ["students", "Students"],
+          ["attendance", "Attendance ranking"],
           ["history", "History"],
-          ["classes", "Classes"],
+          ...(isAdmin ? [["classes", "Classes"]] : []),
         ].map(([key, label]) => (
           <button
             key={key}
@@ -1739,15 +1917,39 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
               </header>
               <div className="student-modal-fields">
                 <label>
-                  Full name
+                  First name
                   <input
                     required
                     pattern="[^0-9]+"
                     title="Names cannot contain numbers."
-                    autoComplete="name"
-                    placeholder="e.g. Alex Santos"
-                    value={form.name}
-                    onChange={(e) => setForm({ ...form, name: e.target.value })}
+                    autoComplete="given-name"
+                    placeholder="e.g. Luige"
+                    value={form.firstName}
+                    onChange={(e) => setForm({ ...form, firstName: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Middle name
+                  <input
+                    required
+                    pattern="[^0-9]+"
+                    title="Names cannot contain numbers."
+                    autoComplete="additional-name"
+                    placeholder="e.g. Emmanuel"
+                    value={form.middleName}
+                    onChange={(e) => setForm({ ...form, middleName: e.target.value })}
+                  />
+                </label>
+                <label>
+                  Last name
+                  <input
+                    required
+                    pattern="[^0-9]+"
+                    title="Names cannot contain numbers."
+                    autoComplete="family-name"
+                    placeholder="e.g. Dela Torre"
+                    value={form.lastName}
+                    onChange={(e) => setForm({ ...form, lastName: e.target.value })}
                   />
                 </label>
                 <label>
@@ -1872,15 +2074,36 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             </header>
             <div className="student-modal-fields">
               <label>
-                Full name
+                First name
                 <input
                   required
                   pattern="[^0-9]+"
                   title="Names cannot contain numbers."
-                  value={editForm.name}
-                  onChange={(e) =>
-                    setEditForm({ ...editForm, name: e.target.value })
-                  }
+                  autoComplete="given-name"
+                  value={editForm.firstName}
+                  onChange={(e) => setEditForm({ ...editForm, firstName: e.target.value })}
+                />
+              </label>
+              <label>
+                Middle name
+                <input
+                  required
+                  pattern="[^0-9]+"
+                  title="Names cannot contain numbers."
+                  autoComplete="additional-name"
+                  value={editForm.middleName}
+                  onChange={(e) => setEditForm({ ...editForm, middleName: e.target.value })}
+                />
+              </label>
+              <label>
+                Last name
+                <input
+                  required
+                  pattern="[^0-9]+"
+                  title="Names cannot contain numbers."
+                  autoComplete="family-name"
+                  value={editForm.lastName}
+                  onChange={(e) => setEditForm({ ...editForm, lastName: e.target.value })}
                 />
               </label>
               <label>
@@ -1942,7 +2165,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
                   {editFilePreview || editingStudent?.photo ? (
                     <img
                       src={editFilePreview || editingStudent.photo}
-                      alt={`${editForm.name || "Student"} portrait preview`}
+                      alt={`${formatStudentName(editForm) || "Student"} portrait preview`}
                     />
                   ) : (
                     <span className="portrait-preview-placeholder">No portrait available</span>
@@ -1962,6 +2185,112 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         )}
       </section>
       </>}
+      {page === "attendance" && <section className="workspace-page">
+        <div className="page-heading page-heading-compact">
+          <div>
+            <p className="eyebrow">ATTENDANCE OVERVIEW</p>
+            <h1>Student attendance ranking</h1>
+            <p className="muted">Students are ranked by attendance, from most present to most absent.</p>
+          </div>
+        </div>
+        <section className="management-card history-table-card">
+          <div className="section-title">
+            <div>
+              <p className="eyebrow">ALL STUDENTS</p>
+              <h2>{rankedStudents.length} students ranked</h2>
+            </div>
+          </div>
+          <div className="history-controls">
+            <label>
+              Search
+              <input
+                type="search"
+                placeholder="Student name or ID"
+                value={studentSearch}
+                onChange={(event) => setStudentSearch(event.target.value)}
+              />
+            </label>
+            <label>
+              Class
+              <select
+                value={studentCourseFilter && studentYearFilter && studentBlockFilter
+                  ? `${studentCourseFilter}|${studentYearFilter}|${studentBlockFilter}`
+                  : ""}
+                onChange={(event) => {
+                  const [nextCourse = "", nextYear = "", nextBlock = ""] = event.target.value.split("|");
+                  setStudentCourseFilter(nextCourse);
+                  setStudentYearFilter(nextYear);
+                  setStudentBlockFilter(nextBlock);
+                }}
+              >
+                <option value="">All classes</option>
+                {directoryClasses.map((item) => (
+                  <option key={classLabel(item)} value={`${item.course}|${item.yearLevel}|${item.block}`}>
+                    {classLabel(item)}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label>
+              Rank by
+              <select value={attendanceSort} onChange={(event) => setAttendanceSort(event.target.value)}>
+                <option value="present">Most attendance</option>
+                <option value="absent">Most absences</option>
+                <option value="rate">Attendance rate</option>
+                <option value="name">Student name</option>
+              </select>
+            </label>
+            {(studentSearch || studentCourseFilter || studentYearFilter || studentBlockFilter || attendanceSort !== "present") && (
+              <button
+                type="button"
+                className="secondary-button clear-history-filters"
+                onClick={() => {
+                  setStudentSearch("");
+                  setStudentCourseFilter("");
+                  setStudentYearFilter("");
+                  setStudentBlockFilter("");
+                  setAttendanceSort("present");
+                }}
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+          <div className="history-table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rank</th>
+                  <th>Student</th>
+                  <th>Class</th>
+                  <th>Present</th>
+                  <th>Late</th>
+                  <th>Absent</th>
+                  <th>Sessions</th>
+                  <th>Attendance rate</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rankedStudents.map((student, index) => (
+                  <tr key={student.studentId}>
+                    <td>{index + 1}</td>
+                    <td><b>{student.name}</b><small>{student.studentId}</small></td>
+                    <td>{student.sectionName}</td>
+                    <td>{student.presentCount}</td>
+                    <td>{student.lateCount}</td>
+                    <td>{student.absentCount}</td>
+                    <td>{student.totalSessions}</td>
+                    <td>{student.totalSessions ? `${Math.round(student.attendanceRate * 100)}%` : "No sessions"}</td>
+                  </tr>
+                ))}
+                {!rankedStudents.length && (
+                  <tr><td colSpan="8" className="empty">No students match the selected search or class filter.</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </section>}
       {page === "history" && <section className="workspace-page">
         <div className="page-heading page-heading-compact">
           <div>
@@ -2013,7 +2342,7 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           </section>
         </div>
       </section>}
-      {page === "classes" && <section className="workspace-page">
+      {isAdmin && page === "classes" && <section className="workspace-page">
         <div className="page-heading page-heading-compact"><div><p className="eyebrow">CLASS MANAGEMENT</p><h1>Classes</h1><p className="muted">Create the course, year level, and block combinations used throughout the system.</p></div></div>
         <div className="history-layout">
           <form className="management-card history-form" onSubmit={addClass}>

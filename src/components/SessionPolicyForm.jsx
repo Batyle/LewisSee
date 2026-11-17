@@ -3,6 +3,7 @@ import { parseClockToMinutes, sessionTimeRanges } from "../attendancePolicy";
 
 const emptyDraft = {
   mode: "timed",
+  rosterScope: "class",
   timeInStart: "08:00",
   timeInEnd: "08:15",
   lateStart: "08:16",
@@ -16,6 +17,7 @@ const getDraft = (session) => {
   const ranges = sessionTimeRanges(session);
   return {
     mode: session.mode || "timed",
+    rosterScope: session.rosterScope || "class",
     timeInStart: ranges.timeInStart || "08:00",
     timeInEnd: ranges.timeInEnd || "08:15",
     lateStart: ranges.lateStart || "",
@@ -54,10 +56,11 @@ export default function SessionPolicyForm({
     }
 
     if (draft.mode === "manual") {
-      onSave({
+      const saved = onSave({
         id: session?.id || crypto.randomUUID(),
         section,
         date,
+        rosterScope: draft.rosterScope,
         mode: "manual",
         // Switching from scheduled → manual must open attendance immediately.
         // Only preserve "ended" when the session was already manual.
@@ -69,6 +72,10 @@ export default function SessionPolicyForm({
         timeOutStart: null,
         timeOutEnd: null,
       });
+      if (saved === false) {
+        setMessage("Only one all-students attendance session can be saved per date.");
+        return;
+      }
       setMessage(
         session
           ? "Manual attendance is open for today. Keep scanning — check-ins and emails are unlocked."
@@ -121,10 +128,11 @@ export default function SessionPolicyForm({
       return;
     }
 
-    onSave({
+    const saved = onSave({
       id: session?.id || crypto.randomUUID(),
       section,
       date,
+      rosterScope: draft.rosterScope,
       mode: "timed",
       ended: false,
       timeInStart: draft.timeInStart,
@@ -134,6 +142,10 @@ export default function SessionPolicyForm({
       timeOutStart: hasTimeOutStart ? draft.timeOutStart : null,
       timeOutEnd: hasTimeOutEnd ? draft.timeOutEnd : null,
     });
+    if (saved === false) {
+      setMessage("Only one all-students attendance session can be saved per date.");
+      return;
+    }
     setMessage(session ? "Attendance policy updated." : "Attendance policy saved.");
   };
 
@@ -155,10 +167,26 @@ export default function SessionPolicyForm({
           value={draft.mode}
           onChange={(event) => update("mode", event.target.value)}
         >
-          <option value="timed">Scheduled times</option>
-          <option value="manual">Manual end button</option>
+          <option value="timed">Schedule mode</option>
+          <option value="manual">Manual Mode</option>
         </select>
       </label>
+      <label className="session-policy-mode">
+        Attendance roster
+        <select
+          disabled={disabled}
+          value={draft.rosterScope}
+          onChange={(event) => update("rosterScope", event.target.value)}
+        >
+          <option value="class">Selected course / year / block</option>
+          <option value="all">All enrolled students</option>
+        </select>
+      </label>
+      <p className="muted session-policy-help">
+        {draft.rosterScope === "all"
+          ? "This session can recognize every enrolled student. Attendance is recorded under each student's own class."
+          : "Only students assigned to the selected course, year, and block can be recognized."}
+      </p>
       {draft.mode === "manual" ? (
         <p className="muted session-policy-help">
           Save this policy to allow verified check-ins at any time today. Use the
