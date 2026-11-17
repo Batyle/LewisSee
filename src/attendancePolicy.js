@@ -1,3 +1,5 @@
+import { sessionTargetsRecord } from "./attendanceRoster";
+
 const MANILA_TZ = "Asia/Manila";
 
 /** Current calendar date in Philippine Standard Time (Asia/Manila). */
@@ -218,7 +220,12 @@ export const determineAttendanceStatus = (
 
 export const statusForRecord = (record, sessions = []) => {
   const session = sessions.find(
-    (item) => item.section === record.section && item.date === record.date,
+    (item) => item.date === record.date &&
+      item.rosterScope !== "all" &&
+      item.rosterScope !== "selection" &&
+      item.section === record.section,
+  ) || sessions.find(
+    (item) => item.rosterScope === "selection" && sessionTargetsRecord(item, record),
   ) || sessions.find(
     (item) => item.date === record.date && item.rosterScope === "all",
   );

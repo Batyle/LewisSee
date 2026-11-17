@@ -1,3 +1,8 @@
+import {
+  matchesRosterSelection,
+  sessionTargetsRecord,
+} from "../../src/attendanceRoster.js";
+
 function parseClockToMinutes(value) {
   if (value == null || value === "") return null;
   const text = String(value).trim();
@@ -104,11 +109,15 @@ function determineAttendanceStatus(currentScanTime, timeInStart, timeInEnd, late
   return scan >= lateFrom && scan <= lateUntil ? "Late" : "Absent";
 }
 
-function resolveRecordStatus(record, sessionsByKey) {
-  const session = sessionsByKey.get(`${record.section.trim().toLowerCase()}|${record.date}`) ||
-    [...sessionsByKey.values()].find(
-      (item) => item.date === record.date && item.rosterScope === "all",
-    );
+function resolveRecordStatus(record, sessions) {
+  const session = sessions.find(
+    (item) => item.date === record.date &&
+      item.rosterScope !== "all" &&
+      item.rosterScope !== "selection" &&
+      item.section.trim().toLowerCase() === record.section.trim().toLowerCase(),
+  ) || sessions.find(
+    (item) => item.rosterScope === "selection" && sessionTargetsRecord(item, record),
+  ) || sessions.find((item) => item.date === record.date && item.rosterScope === "all");
   if (!session) return ["Present", "Late", "Absent"].includes(record.status) ? record.status : "Present";
   if (session.mode === "manual") return "Present";
   const ranges = sessionTimeRanges(session);
@@ -179,6 +188,7 @@ export async function ensureAttendanceSchema(pool) {
       time_out_end TIME NULL,
       attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed',
       roster_scope VARCHAR(16) NOT NULL DEFAULT 'class',
+      roster_selection JSON NULL,
       attendance_ended BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -250,6 +260,9 @@ export async function ensureAttendanceSchema(pool) {
   if (!sessionFields.has("roster_scope")) {
     await pool.query("ALTER TABLE attendance_sessions ADD COLUMN roster_scope VARCHAR(16) NOT NULL DEFAULT 'class'");
   }
+  if (!sessionFields.has("roster_selection")) {
+    await pool.query("ALTER TABLE attendance_sessions ADD COLUMN roster_selection JSON NULL");
+  }
   const [nameIndexes] = await pool.query(
     "SHOW INDEX FROM students WHERE Key_name = 'unique_student_name'",
   );
@@ -286,7 +299,7 @@ export async function loadAttendanceStore(pool) {
            TIME_FORMAT(late_end, '%H:%i') AS late_end,
            TIME_FORMAT(time_out, '%H:%i') AS time_out,
            TIME_FORMAT(time_out_end, '%H:%i') AS time_out_end,
-           attendance_mode, attendance_ended, roster_scope
+           attendance_mode, attendance_ended, roster_scope, roster_selection
     FROM attendance_sessions
     ORDER BY session_date DESC, section
   `);
@@ -337,6 +350,9 @@ export async function loadAttendanceStore(pool) {
       timeOutEnd: row.time_out_end,
       mode,
       rosterScope: row.roster_scope || "class",
+      rosterSelection: typeof row.roster_selection === "string"
+        ? JSON.parse(row.roster_selection)
+        : row.roster_selection || {},
       ended: Boolean(mode === "manual" && row.attendance_ended),
     };
     if (session.mode === "manual") return session;
@@ -357,6 +373,10 @@ export async function loadAttendanceStore(pool) {
       timeOutEnd: row.time_out_end,
       mode,
       ended: false,
+      rosterScope: row.roster_scope || "class",
+      rosterSelection: typeof row.roster_selection === "string"
+        ? JSON.parse(row.roster_selection)
+        : row.roster_selection || {},
     };
   });
 
@@ -526,8 +546,17 @@ export async function replaceAttendanceStore(pool, storeInput) {
       error.statusCode = 422;
       throw error;
     }
-    if (!["class", "all"].includes(session.rosterScope || "class")) {
-      throw validationError("Attendance roster scope must be class or all.");
+    if (!["class", "selection", "all"].includes(session.rosterScope || "class")) {
+      throw validationError("Attendance roster scope must be class, selection, or all.");
+    }
+    if (session.rosterScope === "selection") {
+      const selection = session.rosterSelection || {};
+      if (!["course", "yearLevel", "block", "studentId"].some((key) => String(selection[key] || "").trim())) {
+        throw validationError("Choose at least one course, year, block, or student for the attendance roster.");
+      }
+      if (!store.students.some((student) => matchesRosterSelection(student, selection))) {
+        throw validationError("The selected attendance roster has no enrolled students.");
+      }
     }
     if ((session.rosterScope || "class") === "all") {
       if (allRosterSessionDates.has(session.date)) {
@@ -572,10 +601,6 @@ export async function replaceAttendanceStore(pool, storeInput) {
     }
     sessionKeys.add(key);
   }
-
-  const sessionsByKey = new Map(
-    store.sessions.map((session) => [`${String(session.section || "").trim().toLowerCase()}|${session.date}`, session]),
-  );
 
   const connection = await pool.getConnection();
   try {
@@ -622,7 +647,7 @@ export async function replaceAttendanceStore(pool, storeInput) {
         `INSERT INTO attendance_sessions
           (id, section, session_date, required_time_in, time_in_end,
            late_start, late_end, grace_period_minutes, late_threshold_minutes,
-           time_out, time_out_end, attendance_mode, attendance_ended, roster_scope)
+           time_out, time_out_end, attendance_mode, attendance_ended, roster_scope, roster_selection)
          VALUES ?`,
         [store.sessions.map((session) => {
           const ranges = sessionTimeRanges(session);
@@ -646,6 +671,7 @@ export async function replaceAttendanceStore(pool, storeInput) {
             isManual ? "manual" : "timed",
             Boolean(isManual && session.ended),
             session.rosterScope || "class",
+            session.rosterScope === "selection" ? JSON.stringify(session.rosterSelection || {}) : null,
           ];
         })],
       );
@@ -675,7 +701,7 @@ export async function replaceAttendanceStore(pool, storeInput) {
           formatMysqlDate(record.date),
           record.section,
           record.time,
-          resolveRecordStatus(record, sessionsByKey),
+          resolveRecordStatus(record, store.sessions),
           record.timeOut || null,
         ])],
       );

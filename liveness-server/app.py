@@ -130,7 +130,8 @@ class AttendanceSession(BaseModel):
     lateThresholdMinutes: int | None = Field(default=None, ge=0, le=720)
     timeOut: str | None = Field(default=None, max_length=8)
     mode: str = Field(default="timed", pattern=r"^(timed|manual)$")
-    rosterScope: str = Field(default="class", pattern=r"^(class|all)$")
+    rosterScope: str = Field(default="class", pattern=r"^(class|selection|all)$")
+    rosterSelection: dict[str, Any] | None = None
     ended: bool = False
 
 
@@ -237,14 +238,57 @@ def determine_attendance_status(
     return "Absent"
 
 
+def roster_selection_matches(student: Any, selection: dict[str, Any] | None) -> bool:
+    selection = selection or {}
+    course = student.get("course", "") if isinstance(student, dict) else student.course
+    year_level = student.get("year_level", student.get("yearLevel", "")) if isinstance(student, dict) else student.yearLevel
+    block = student.get("block", "") if isinstance(student, dict) else student.block
+    student_id = student.get("student_id", student.get("studentId", "")) if isinstance(student, dict) else student.studentId
+    return (
+        (not selection.get("course") or str(course).strip().casefold() == str(selection["course"]).strip().casefold())
+        and (not selection.get("yearLevel") or str(year_level) == str(selection["yearLevel"]))
+        and (not selection.get("block") or str(block).strip().casefold() == str(selection["block"]).strip().casefold())
+        and (not selection.get("studentId") or str(student_id).strip().casefold() == str(selection["studentId"]).strip().casefold())
+    )
+
+
+def session_targets_record(session: AttendanceSession, record: AttendanceRecord) -> bool:
+    if session.date != record.date:
+        return False
+    if session.rosterScope == "all":
+        return True
+    if session.rosterScope != "selection":
+        return session.section.strip().casefold() == record.section.strip().casefold()
+    match = re.fullmatch(r"(.+?)\s+(\d+)([A-Za-z0-9-]+)", record.section.strip())
+    if not match:
+        return False
+    return roster_selection_matches(
+        {
+            "course": match.group(1),
+            "year_level": match.group(2),
+            "block": match.group(3),
+            "student_id": record.studentId,
+        },
+        session.rosterSelection,
+    )
+
+
 def resolve_record_status(record: AttendanceRecord, sessions_by_key: dict[tuple[str, str], AttendanceSession]) -> str:
-    session = sessions_by_key.get((record.section.strip().casefold(), record.date))
-    if not session:
-        session = next(
-            (item for item in sessions_by_key.values()
-             if item.date == record.date and item.rosterScope == "all"),
-            None,
-        )
+    sessions = list(sessions_by_key.values())
+    session = next(
+        (item for item in sessions
+         if item.date == record.date
+         and item.rosterScope not in {"all", "selection"}
+         and item.section.strip().casefold() == record.section.strip().casefold()),
+        None,
+    ) or next(
+        (item for item in sessions
+         if item.rosterScope == "selection" and session_targets_record(item, record)),
+        None,
+    ) or next(
+        (item for item in sessions if item.date == record.date and item.rosterScope == "all"),
+        None,
+    )
     if not session:
         return record.status if record.status in {"Present", "Late", "Absent"} else "Present"
     if session.mode == "manual":
@@ -482,6 +526,7 @@ def ensure_schema(connection: Any) -> None:
               time_out_end TIME NULL,
               attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed',
               roster_scope VARCHAR(16) NOT NULL DEFAULT 'class',
+              roster_selection JSON NULL,
               attendance_ended BOOLEAN NOT NULL DEFAULT FALSE,
               created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
               updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -506,6 +551,8 @@ def ensure_schema(connection: Any) -> None:
             cursor.execute(
                 "ALTER TABLE attendance_sessions ADD COLUMN roster_scope VARCHAR(16) NOT NULL DEFAULT 'class'"
             )
+        if "roster_selection" not in session_columns:
+            cursor.execute("ALTER TABLE attendance_sessions ADD COLUMN roster_selection JSON NULL")
         cursor.execute("""
             CREATE TABLE IF NOT EXISTS attendance_email_outbox (
               record_id VARCHAR(191) PRIMARY KEY,
@@ -971,12 +1018,15 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                               TIME_FORMAT(late_end, '%H:%i') AS late_end,
                               TIME_FORMAT(time_out, '%H:%i') AS time_out,
                               TIME_FORMAT(time_out_end, '%H:%i') AS time_out_end,
-                              attendance_mode, attendance_ended, roster_scope
+                              attendance_mode, attendance_ended, roster_scope, roster_selection
                               FROM attendance_sessions
                               ORDER BY session_date DESC, section""")
             sessions = []
             for row in cursor.fetchall():
                 mode = "manual" if row["attendance_mode"] == "manual" else "timed"
+                roster_selection = row.get("roster_selection") or {}
+                if isinstance(roster_selection, (str, bytes, bytearray)):
+                    roster_selection = json.loads(roster_selection)
                 session = AttendanceSession(
                     id=row["id"],
                     section=row["section"],
@@ -990,6 +1040,7 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                     lateThresholdMinutes=row["late_threshold_minutes"],
                     mode=mode,
                     rosterScope=row.get("roster_scope") or "class",
+                    rosterSelection=roster_selection,
                     ended=bool(mode == "manual" and row["attendance_ended"]),
                 )
                 if session.mode == "manual":
@@ -998,6 +1049,7 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                         "section": row["section"],
                         "date": row["date"],
                         "rosterScope": session.rosterScope,
+                        "rosterSelection": session.rosterSelection or {},
                         "requiredTimeIn": row["required_time_in"] or "00:00",
                         "timeInStart": row["required_time_in"] or "00:00",
                         "timeInEnd": row["time_in_end"] or "23:59",
@@ -1011,6 +1063,7 @@ def get_attendance() -> dict[str, list[dict[str, Any]]]:
                     "section": row["section"],
                     "date": row["date"],
                     "rosterScope": session.rosterScope,
+                    "rosterSelection": session.rosterSelection or {},
                     "requiredTimeIn": time_in_start,
                     "timeInStart": time_in_start,
                     "timeInEnd": time_in_end,
@@ -1109,6 +1162,12 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
             if session.date in all_roster_session_dates:
                 raise HTTPException(status_code=422, detail="Only one all-students attendance session is allowed per date.")
             all_roster_session_dates.add(session.date)
+        if session.rosterScope == "selection":
+            selection = session.rosterSelection or {}
+            if not any(str(selection.get(key) or "").strip() for key in ("course", "yearLevel", "block", "studentId")):
+                raise HTTPException(status_code=422, detail="Choose at least one course, year, block, or student for the attendance roster.")
+            if not any(roster_selection_matches(student, selection) for student in store.students):
+                raise HTTPException(status_code=422, detail="The selected attendance roster has no enrolled students.")
         if session.mode == "manual":
             session_keys.add(key)
             continue
@@ -1177,8 +1236,8 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                     """INSERT INTO attendance_sessions
                     (id, section, session_date, required_time_in, time_in_end,
                      late_start, late_end, grace_period_minutes, late_threshold_minutes,
-                     time_out, time_out_end, attendance_mode, attendance_ended, roster_scope)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                     time_out, time_out_end, attendance_mode, attendance_ended, roster_scope, roster_selection)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                     [
                         (
                             session.id,
@@ -1198,6 +1257,7 @@ def replace_attendance(store: AttendanceStore) -> dict[str, int]:
                             "manual" if session.mode == "manual" else "timed",
                             bool(session.mode == "manual" and session.ended),
                             session.rosterScope,
+                            json.dumps(session.rosterSelection or {}) if session.rosterScope == "selection" else None,
                         )
                         for session in store.sessions
                     ],
@@ -1313,7 +1373,7 @@ def process_scheduled_absences(
 
             try:
                 cursor.execute(
-                    """SELECT section, roster_scope,
+                    """SELECT section, roster_scope, roster_selection,
                               DATE_FORMAT(session_date, '%%Y-%%m-%%d') AS session_date,
                               TIME_FORMAT(COALESCE(late_end, time_in_end), '%%H:%%i:%%s') AS attendance_end
                        FROM attendance_sessions
@@ -1324,8 +1384,20 @@ def process_scheduled_absences(
                     (session_date, current_time),
                 )
                 sessions = cursor.fetchall()
+                selection_sessions = []
+                for item in sessions:
+                    if item["roster_scope"] != "selection":
+                        continue
+                    selection = item.get("roster_selection") or {}
+                    if isinstance(selection, (str, bytes, bytearray)):
+                        selection = json.loads(selection)
+                    if any(str(selection.get(key) or "").strip() for key in ("course", "yearLevel", "block", "studentId")):
+                        selection_sessions.append(selection)
 
                 for session in sessions:
+                    roster_selection = session.get("roster_selection") or {}
+                    if isinstance(roster_selection, (str, bytes, bytearray)):
+                        roster_selection = json.loads(roster_selection)
                     if session["roster_scope"] == "all":
                         cursor.execute(
                             """SELECT s.student_id, s.name, s.email,
@@ -1347,6 +1419,43 @@ def process_scheduled_absences(
                                  )""",
                             (session_date, session_date),
                         )
+                        candidates = cursor.fetchall()
+                        students_to_mark = [
+                            student for student in candidates
+                            if not any(roster_selection_matches(student, item) for item in selection_sessions)
+                        ]
+                    elif session["roster_scope"] == "selection":
+                        filters = []
+                        parameters = []
+                        if roster_selection.get("course"):
+                            filters.append("LOWER(TRIM(s.course)) = LOWER(%s)")
+                            parameters.append(roster_selection["course"])
+                        if roster_selection.get("yearLevel"):
+                            filters.append("s.year_level = %s")
+                            parameters.append(roster_selection["yearLevel"])
+                        if roster_selection.get("block"):
+                            filters.append("LOWER(TRIM(s.block)) = LOWER(%s)")
+                            parameters.append(roster_selection["block"])
+                        if roster_selection.get("studentId"):
+                            filters.append("LOWER(TRIM(s.student_id)) = LOWER(%s)")
+                            parameters.append(roster_selection["studentId"])
+                        if not filters:
+                            continue
+                        cursor.execute(
+                            f"""SELECT s.student_id, s.name, s.email,
+                                      CONCAT(TRIM(s.course), ' ', s.year_level, TRIM(s.block)) AS section
+                               FROM students s
+                               WHERE {' AND '.join(filters)}
+                                 AND NOT EXISTS (
+                                   SELECT 1 FROM attendance_records r
+                                   WHERE r.student_id = s.student_id
+                                     AND r.attendance_date = %s
+                                     AND LOWER(TRIM(r.section)) =
+                                         LOWER(CONCAT(TRIM(s.course), ' ', s.year_level, TRIM(s.block)))
+                                 )""",
+                            (*parameters, session_date),
+                        )
+                        students_to_mark = cursor.fetchall()
                     else:
                         cursor.execute(
                             """SELECT s.student_id, s.name, s.email, %s AS section
@@ -1360,7 +1469,8 @@ def process_scheduled_absences(
                                  )""",
                             (session["section"], session["section"], session_date, session["section"]),
                         )
-                    for student in cursor.fetchall():
+                        students_to_mark = cursor.fetchall()
+                    for student in students_to_mark:
                         record_id = str(uuid.uuid4())
                         cursor.execute(
                             """INSERT IGNORE INTO attendance_records

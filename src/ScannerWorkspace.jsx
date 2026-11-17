@@ -17,6 +17,11 @@ import {
 import { NotificationConnection } from "./connection";
 import { loadAttendanceStore, saveAttendanceStore } from "./attendanceApi";
 import {
+  matchesRosterSelection,
+  matchesSessionRoster,
+  sessionTargetsRecord,
+} from "./attendanceRoster";
+import {
   determineAttendanceStatus,
   formatClock12Hour,
   isAttendancePolicyReady,
@@ -632,14 +637,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       all.map((record) => {
         if (record.date !== normalized.date) return record;
         if (
-          record.section !== normalized.section &&
-          normalized.rosterScope !== "all" &&
-          !updatedSessions.some(
-            (item) =>
-              item.section === record.section &&
-              item.date === record.date &&
-              item.rosterScope !== "all",
-          )
+          !sessionTargetsRecord(normalized, record) &&
+          !updatedSessions.some((item) => sessionTargetsRecord(item, record))
         ) return record;
         return { ...record, status: statusForRecord(record, updatedSessions) };
       }),
@@ -670,8 +669,13 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       currentSession = sessionsRef.current.find(
         (item) =>
           item.date === scanDate &&
-          item.section === classLabel(student) &&
-          item.rosterScope !== "all",
+          item.rosterScope === "class" &&
+          item.section === classLabel(student),
+      ) || sessionsRef.current.find(
+        (item) =>
+          item.date === scanDate &&
+          item.rosterScope === "selection" &&
+          matchesRosterSelection(student, item.rosterSelection),
       ) || currentSession;
     }
     if (
@@ -685,7 +689,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
     const phase = liveAttendancePhaseAt(scanTime, currentSession);
     if (!phase) return;
     const recordSection =
-      allRoster ? classLabel(student) : scanSection;
+      allRoster || selectedSession?.rosterScope === "selection"
+        ? classLabel(student)
+        : scanSection;
     const attendanceKey = JSON.stringify([
       String(student.studentId || "").trim().toLowerCase(),
       scanDate,
@@ -810,11 +816,9 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           return;
         const detected = await detect(frame.current);
         const activeClass = selectedClass.current;
-        const classRoster = activeSessionRef.current?.rosterScope === "all"
-          ? roster.current
-          : roster.current.filter((student) =>
-              belongsToClass(student, activeClass.course, activeClass.yearLevel, activeClass.block),
-            );
+        const classRoster = roster.current.filter((student) =>
+          matchesSessionRoster(student, activeSessionRef.current, activeClass),
+        );
         const matches = detected.map((face) => {
           let best,
             score = Infinity;
@@ -860,8 +864,13 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
           currentSession = sessionsRef.current.find(
             (item) =>
               item.date === scanDate &&
-              item.section === classLabel(found.student) &&
-              item.rosterScope !== "all",
+              item.rosterScope === "class" &&
+              item.section === classLabel(found.student),
+          ) || sessionsRef.current.find(
+            (item) =>
+              item.date === scanDate &&
+              item.rosterScope === "selection" &&
+              matchesRosterSelection(found.student, item.rosterSelection),
           ) || currentSession;
         }
         const policyReady = isAttendancePolicyReady(currentSession);
@@ -877,7 +886,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
             record.studentId === found.student.studentId &&
             record.date === scanDate &&
             record.section === (
-              selectedSession?.rosterScope === "all"
+              selectedSession?.rosterScope === "all" ||
+              selectedSession?.rosterScope === "selection"
                 ? classLabel(found.student)
                 : scanSection
             ),
@@ -1494,12 +1504,14 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
       datesBySection.get(key).add(dateValue);
     };
 
-    sessions.forEach((session) => addSessionDate(session.section, session.date));
     sessions
-      .filter((session) => session.rosterScope === "all")
-      .forEach((session) => displayedStudents.forEach((student) =>
-        addSessionDate(classLabel(student), session.date),
-      ));
+      .filter((session) => session.rosterScope !== "all" && session.rosterScope !== "selection")
+      .forEach((session) => addSessionDate(session.section, session.date));
+    sessions
+      .filter((session) => session.rosterScope === "all" || session.rosterScope === "selection")
+      .forEach((session) => displayedStudents
+        .filter((student) => matchesSessionRoster(student, session))
+        .forEach((student) => addSessionDate(classLabel(student), session.date)));
     records.forEach((record) => addSessionDate(record.section, record.date));
 
     const ranked = displayedStudents.map((student) => {
@@ -1713,6 +1725,8 @@ export default function ScannerWorkspace({ staffUser, onSignOut, embedded = fals
         session={activeSession}
         onSave={saveSessionPolicy}
         onEnd={toggleManualAttendance}
+        students={students}
+        classes={activeClasses}
         disabled={!cloudLoaded}
       />
       <section className="attendance-grid">

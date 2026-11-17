@@ -97,6 +97,7 @@ CREATE TABLE IF NOT EXISTS attendance_sessions (
   time_out_end TIME NULL,
   attendance_mode VARCHAR(16) NOT NULL DEFAULT 'timed',
   roster_scope VARCHAR(16) NOT NULL DEFAULT 'class',
+  roster_selection JSON NULL,
   attendance_ended BOOLEAN NOT NULL DEFAULT FALSE,
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
