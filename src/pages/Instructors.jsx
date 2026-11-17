@@ -58,6 +58,7 @@ export default function Instructors() {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busyUid, setBusyUid] = useState("");
+  const [bulkAction, setBulkAction] = useState("");
   const [editingInstructor, setEditingInstructor] = useState(null);
   const [editForm, setEditForm] = useState({ name: "", instructorId: "", newPassword: "" });
   const [requestSort, setRequestSort] = useState("date-desc");
@@ -165,6 +166,53 @@ export default function Instructors() {
     } finally {
       setBusyUid("");
     }
+  };
+
+  const runBulkAction = async ({ key, people, action, confirmation, label }) => {
+    if (!people.length || busyUid || bulkAction || !window.confirm(confirmation)) return;
+
+    setBulkAction(key);
+    setError("");
+    setNotice("");
+    let updated = 0;
+    let emailFailures = 0;
+    const failures = [];
+
+    for (const person of people) {
+      try {
+        const result = await action(person.uid);
+        updated += 1;
+        if (result.emailSent === false && result.instructor?.email) {
+          try {
+            const decision = key === "accept" || key === "reactivate"
+              ? "approved"
+              : key === "reject"
+                ? "rejected"
+                : "suspended";
+            await sendInstructorDecisionEmail(result.instructor, decision);
+          } catch {
+            emailFailures += 1;
+          }
+        } else if (result.emailSent === false) {
+          emailFailures += 1;
+        }
+      } catch (cause) {
+        failures.push(`${person.name}: ${cause.message || "Update failed"}`);
+      }
+    }
+
+    const summary = `${label}: updated ${updated} of ${people.length}.`;
+    const emailNotice = emailFailures
+      ? ` Email notification failed for ${emailFailures} account${emailFailures === 1 ? "" : "s"}.`
+      : "";
+    if (failures.length) {
+      setError(`${summary}${emailNotice} Failed: ${failures.slice(0, 5).join("; ")}${failures.length > 5 ? `; and ${failures.length - 5} more` : ""}`);
+    } else {
+      setNotice(`${summary}${emailNotice}`);
+    }
+
+    await load({ reportError: false });
+    setBulkAction("");
   };
 
   const removeInstructor = (person) => {
@@ -291,6 +339,39 @@ export default function Instructors() {
             </label>
             <button
               type="button"
+              className="admin-action-approve"
+              disabled={Boolean(busyUid || bulkAction || pending.length === 0)}
+              onClick={() => void runBulkAction({
+                key: "accept",
+                people: pending,
+                action: approveInstructor,
+                label: "Accept all pending requests",
+                confirmation: `Accept all ${pending.length} pending instructor request${pending.length === 1 ? "" : "s"}? Each instructor will be notified.`,
+              })}
+            >
+              {bulkAction === "accept" ? "Accepting…" : `Accept all pending (${pending.length})`}
+            </button>
+            <button
+              type="button"
+              className="admin-action-reject"
+              disabled={Boolean(busyUid || bulkAction || pending.length === 0)}
+              onClick={() => {
+                const reason = window.prompt("Optional rejection reason for all pending requests:", "");
+                if (reason !== null) {
+                  void runBulkAction({
+                    key: "reject",
+                    people: pending,
+                    action: (uid) => rejectInstructor(uid, reason),
+                    label: "Reject all pending requests",
+                    confirmation: `Reject all ${pending.length} pending instructor request${pending.length === 1 ? "" : "s"}? Each instructor will be notified.`,
+                  });
+                }
+              }}
+            >
+              {bulkAction === "reject" ? "Rejecting…" : `Reject all pending (${pending.length})`}
+            </button>
+            <button
+              type="button"
               className="admin-refresh"
               onClick={() => {
                 setLoading(true);
@@ -298,7 +379,7 @@ export default function Instructors() {
                   if (sequence === loadSequence.current) setLoading(false);
                 });
               }}
-              disabled={Boolean(busyUid)}
+              disabled={Boolean(busyUid || bulkAction)}
             >
               Refresh
             </button>
@@ -330,7 +411,7 @@ export default function Instructors() {
                   <button
                     type="button"
                     className="admin-refresh"
-                    disabled={Boolean(busyUid)}
+                    disabled={Boolean(busyUid || bulkAction)}
                     onClick={() => resendInstructorEmail(person)}
                   >
                     {busyUid === person.uid ? "Sending…" : "Resend email"}
@@ -338,7 +419,7 @@ export default function Instructors() {
                   <button
                     type="button"
                     className="admin-action-approve"
-                    disabled={busyUid === person.uid}
+                    disabled={Boolean(busyUid || bulkAction)}
                     onClick={() => runAction(person.uid, () => approveInstructor(person.uid), "approved")}
                   >
                     Approve
@@ -346,7 +427,7 @@ export default function Instructors() {
                   <button
                     type="button"
                     className="admin-action-reject"
-                    disabled={busyUid === person.uid}
+                    disabled={Boolean(busyUid || bulkAction)}
                     onClick={() => {
                       const reason = window.prompt("Optional rejection reason:", "");
                       if (reason !== null) {
@@ -359,7 +440,7 @@ export default function Instructors() {
                   <button
                     type="button"
                     className="admin-action-reject"
-                    disabled={Boolean(busyUid)}
+                    disabled={Boolean(busyUid || bulkAction)}
                     onClick={() => removeInstructor(person)}
                   >
                     Delete
@@ -404,6 +485,40 @@ export default function Instructors() {
                 <option value="name-desc">Name Z–A</option>
               </select>
             </label>
+            <button
+              type="button"
+              className="admin-action-reject"
+              disabled={Boolean(busyUid || bulkAction || !instructors.some((person) => person.status === "active"))}
+              onClick={() => {
+                const activeInstructors = instructors.filter((person) => person.status === "active");
+                void runBulkAction({
+                  key: "suspend",
+                  people: activeInstructors,
+                  action: suspendInstructor,
+                  label: "Suspend all active instructors",
+                  confirmation: `Suspend all ${activeInstructors.length} active instructor${activeInstructors.length === 1 ? "" : "s"}? Each instructor will be notified and signed-in sessions will be blocked.`,
+                });
+              }}
+            >
+              {bulkAction === "suspend" ? "Suspending…" : "Suspend all active"}
+            </button>
+            <button
+              type="button"
+              className="admin-action-approve"
+              disabled={Boolean(busyUid || bulkAction || !instructors.some((person) => ["suspended", "rejected"].includes(person.status)))}
+              onClick={() => {
+                const restorableInstructors = instructors.filter((person) => ["suspended", "rejected"].includes(person.status));
+                void runBulkAction({
+                  key: "reactivate",
+                  people: restorableInstructors,
+                  action: approveInstructor,
+                  label: "Reactivate all suspended and rejected instructors",
+                  confirmation: `Reactivate all ${restorableInstructors.length} suspended or rejected instructor account${restorableInstructors.length === 1 ? "" : "s"}? Each instructor will be notified.`,
+                });
+              }}
+            >
+              {bulkAction === "reactivate" ? "Reactivating…" : "Reactivate all"}
+            </button>
           </div>
         </div>
         {roster.length === 0 ? (
@@ -435,7 +550,7 @@ export default function Instructors() {
                   <button
                     type="button"
                     className="admin-refresh"
-                    disabled={Boolean(busyUid)}
+                    disabled={Boolean(busyUid || bulkAction)}
                     onClick={() => beginEdit(person)}
                   >
                     Edit
@@ -444,7 +559,7 @@ export default function Instructors() {
                     <button
                       type="button"
                       className="admin-action-reject"
-                      disabled={busyUid === person.uid}
+                      disabled={Boolean(busyUid || bulkAction)}
                       onClick={() => runAction(person.uid, () => suspendInstructor(person.uid), "suspended")}
                     >
                       Suspend
@@ -454,7 +569,7 @@ export default function Instructors() {
                     <button
                       type="button"
                       className="admin-action-approve"
-                      disabled={busyUid === person.uid}
+                      disabled={Boolean(busyUid || bulkAction)}
                       onClick={() => runAction(person.uid, () => approveInstructor(person.uid), "approved")}
                     >
                       Reactivate
@@ -463,7 +578,7 @@ export default function Instructors() {
                   <button
                     type="button"
                     className="admin-action-reject"
-                    disabled={Boolean(busyUid)}
+                    disabled={Boolean(busyUid || bulkAction)}
                     onClick={() => removeInstructor(person)}
                   >
                     Delete
@@ -485,7 +600,7 @@ export default function Instructors() {
               <button
                 type="button"
                 className="admin-refresh"
-                disabled={Boolean(busyUid)}
+                disabled={Boolean(busyUid || bulkAction)}
                 onClick={() => setEditingInstructor(null)}
               >
                 Close
@@ -526,8 +641,8 @@ export default function Instructors() {
             </label>
             <small className="admin-instructor-edit-note">For security, passwords are never included in notification emails.</small>
             <div className="admin-person-actions">
-              <button type="button" className="admin-refresh" disabled={Boolean(busyUid)} onClick={() => setEditingInstructor(null)}>Cancel</button>
-              <button type="submit" className="admin-action-approve" disabled={Boolean(busyUid)}>
+              <button type="button" className="admin-refresh" disabled={Boolean(busyUid || bulkAction)} onClick={() => setEditingInstructor(null)}>Cancel</button>
+              <button type="submit" className="admin-action-approve" disabled={Boolean(busyUid || bulkAction)}>
                 {busyUid ? "Saving…" : "Save and notify"}
               </button>
             </div>
