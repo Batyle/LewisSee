@@ -3,7 +3,7 @@ import { parseClockToMinutes, sessionTimeRanges } from "../attendancePolicy";
 
 const emptyDraft = {
   mode: "timed",
-  rosterScope: "class",
+  rosterScope: "selection",
   rosterSelection: { course: "", yearLevel: "", block: "" },
   timeInStart: "08:00",
   timeInEnd: "08:15",
@@ -13,17 +13,26 @@ const emptyDraft = {
   timeOutEnd: "",
 };
 
-const getDraft = (session) => {
-  if (!session) return emptyDraft;
-  const ranges = sessionTimeRanges(session);
+const selectionFromSection = (section) => {
+  const match = /^(.+?)\s+(\d+)([A-Za-z0-9-]+)$/.exec(String(section || "").trim());
+  return match
+    ? { course: match[1], yearLevel: match[2], block: match[3] }
+    : { course: "", yearLevel: "", block: "" };
+};
+
+const getDraft = (session, section) => {
+  const ranges = session ? sessionTimeRanges(session) : {};
+  const rosterScope = session?.rosterScope === "all" ? "all" : "selection";
+  const selection = session?.rosterScope === "selection"
+    ? session.rosterSelection || {}
+    : selectionFromSection(section);
   return {
-    mode: session.mode || "timed",
-    rosterScope: session.rosterScope || "class",
+    mode: session?.mode || "timed",
+    rosterScope,
     rosterSelection: {
-      course: session.rosterSelection?.course || "",
-      yearLevel: session.rosterSelection?.yearLevel ? String(session.rosterSelection.yearLevel) : "",
-      block: session.rosterSelection?.block || "",
-      studentId: session.rosterSelection?.studentId || "",
+      course: selection.course || "",
+      yearLevel: String(selection.yearLevel || ""),
+      block: selection.block || "",
     },
     timeInStart: ranges.timeInStart || "08:00",
     timeInEnd: ranges.timeInEnd || "08:15",
@@ -50,7 +59,7 @@ export default function SessionPolicyForm({
   const [message, setMessage] = useState("");
 
   useEffect(() => {
-    setDraft(getDraft(session));
+    setDraft(getDraft(session, section));
     setMessage("");
   }, [session, section, date]);
 
@@ -86,9 +95,9 @@ export default function SessionPolicyForm({
     }
     if (
       draft.rosterScope === "selection" &&
-      !["course", "yearLevel", "block"].some((key) => draft.rosterSelection[key])
+      !["course", "yearLevel", "block"].every((key) => draft.rosterSelection[key])
     ) {
-      setMessage("Choose at least one course, year, or block for the attendance roster.");
+      setMessage("Choose a course, year, and block for the specific attendance roster.");
       return;
     }
 
@@ -217,9 +226,8 @@ export default function SessionPolicyForm({
           value={draft.rosterScope}
           onChange={(event) => update("rosterScope", event.target.value)}
         >
-          <option value="class">Current scanner course / year / block</option>
           <option value="selection">Specific course / year / block</option>
-          <option value="all">All enrolled students</option>
+          <option value="all">All courses / years / blocks</option>
         </select>
       </label>
       {draft.rosterScope === "selection" && (
@@ -228,10 +236,11 @@ export default function SessionPolicyForm({
             Course
             <select
               disabled={disabled}
+              required={draft.rosterScope === "selection"}
               value={draft.rosterSelection.course}
               onChange={(event) => updateSelection("course", event.target.value)}
             >
-              <option value="">Any course</option>
+              <option value="">Select a course</option>
               {courseOptions.map((item) => <option key={item} value={item}>{item}</option>)}
             </select>
           </label>
@@ -239,10 +248,11 @@ export default function SessionPolicyForm({
             Year
             <select
               disabled={disabled}
+              required={draft.rosterScope === "selection"}
               value={draft.rosterSelection.yearLevel}
               onChange={(event) => updateSelection("yearLevel", event.target.value)}
             >
-              <option value="">Any year</option>
+              <option value="">Select a year</option>
               {yearOptions.map((item) => <option key={item} value={item}>Year {item}</option>)}
             </select>
           </label>
@@ -250,10 +260,11 @@ export default function SessionPolicyForm({
             Block
             <select
               disabled={disabled}
+              required={draft.rosterScope === "selection"}
               value={draft.rosterSelection.block}
               onChange={(event) => updateSelection("block", event.target.value)}
             >
-              <option value="">Any block</option>
+              <option value="">Select a block</option>
               {blockOptions.map((item) => <option key={item} value={item}>Block {item}</option>)}
             </select>
           </label>
@@ -261,10 +272,8 @@ export default function SessionPolicyForm({
       )}
       <p className="muted session-policy-help">
         {draft.rosterScope === "all"
-          ? "This session can recognize every enrolled student. Attendance is recorded under each student's own class."
-          : draft.rosterScope === "selection"
-            ? "Only students matching every selected course, year, and block filter can be recognized or marked absent."
-          : "Only students assigned to the selected course, year, and block can be recognized."}
+          ? "This session can recognize students from every course, year, and block. Attendance is recorded under each student's assigned class."
+          : "Only students matching the selected course, year, and block can be recognized or marked absent."}
       </p>
       {draft.mode === "manual" ? (
         <p className="muted session-policy-help">
