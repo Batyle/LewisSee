@@ -2,6 +2,8 @@ import emailjs from "@emailjs/browser";
 import { sendWithRetry } from "./emailRetry.js";
 import { ADMIN_INSTRUCTOR_EMAILJS, requireEmailJsSettings } from "./emailConfig.js";
 
+const EMAIL_FROM_NAME = "LewisSee | The Lewis College";
+
 function buildDecisionParams(instructor, decision) {
   const approved = decision === "approved";
   const suspended = decision === "suspended";
@@ -18,6 +20,7 @@ function buildDecisionParams(instructor, decision) {
     recipient_email: recipient,
     instructor_email: recipient,
     to_name: instructor.name,
+    from_name: EMAIL_FROM_NAME,
     email: recipient,
     subject: approved
       ? "LewisSee instructor access approved"
@@ -68,6 +71,7 @@ export async function sendInstructorUpdateEmail(instructor, changedFields) {
         recipient_email: recipient,
         instructor_email: recipient,
         to_name: instructor.name,
+        from_name: EMAIL_FROM_NAME,
         email: recipient,
         subject: "LewisSee instructor account update",
         ...(replyTo ? { reply_to: replyTo } : {}),

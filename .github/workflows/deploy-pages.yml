@@ -38,6 +38,7 @@ jobs:
           VITE_FIREBASE_APP_ID: ${{ vars.VITE_FIREBASE_APP_ID }}
           VITE_LIVENESS_API_URL: ${{ vars.VITE_LIVENESS_API_URL || 'https://liveliness-server.vercel.app/liveness' }}
           VITE_ATTENDANCE_API_URL: ${{ vars.VITE_ATTENDANCE_API_URL || 'https://lewissee.onrender.com/attendance' }}
+          VITE_ADMIN_NOTIFICATION_REPLY_TO: ${{ vars.VITE_ADMIN_NOTIFICATION_REPLY_TO }}
       - uses: actions/configure-pages@v5
         with:
           enablement: true

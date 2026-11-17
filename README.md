@@ -60,11 +60,17 @@ The production frontend endpoints are `https://lewissee.onrender.com/attendance`
 
 In Vercel Project Settings → Environment Variables, configure the Aiven connection (`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SSL_MODE=REQUIRED`) and a random `ADMIN_JWT_SECRET` of at least 32 characters. Use the same `ADMIN_JWT_SECRET` in the Render attendance service so it can validate Vercel-issued admin tokens. In Render, configure the same Aiven credentials. Configure all nine `VITE_*EMAILJS*` variables from `.env.production` in Vercel and redeploy whenever those build-time settings change. Never put database credentials or JWT secrets in `.env.production`, source code, or `VITE_*` variables.
 
+### EmailJS deliverability
+
+Instructor request and admin-to-instructor messages use the display name `LewisSee | The Lewis College`. In both EmailJS templates, set **From Email** to the sender address connected to and verified by that EmailJS service; do not use the instructor's or admin recipient's address as the sender. Set **From Name** to `{{from_name}}`, **To Email** to `{{to_email}}`, and **Reply-To** to `{{reply_to}}`. The instructor-request notification replies to the applicant; for admin-to-instructor messages, optionally configure the same monitored mailbox as `ADMIN_NOTIFICATION_REPLY_TO` in Vercel and `VITE_ADMIN_NOTIFICATION_REPLY_TO` in Vercel's frontend build environment (or the matching GitHub Actions variable if deploying with Pages). Use `{{subject}}` as the template subject if you want the code's contextual subject lines.
+
+For best inbox placement, authenticate the sending domain with the email provider's SPF and DKIM DNS records and publish a DMARC policy. These sender/template and DNS settings are managed in EmailJS and the domain's DNS provider, not by application code; correct configuration reduces spam risk but cannot guarantee inbox placement.
+
 ## Limitations
 
 > **Important:** Recognition depends on camera quality, lighting, and a clear view of the student's face. Liveness checks help deter spoofing but cannot guarantee detection of every still image, replay, or deepfake.
 
-- **Email notifications:** EmailJS must be configured and student email addresses must be available. Check-in notifications are sent only for recognized, live-verified scans during today's scheduled window; absent notices are retried and recorded in the email outbox. Obtain consent before enabling photo attachments and follow the institution's image-retention policy.
+- **Email notifications:** EmailJS must be configured and student email addresses must be available. Check-in notifications are sent only for recognized, live-verified scans during today's scheduled window; absent notices are retried and recorded in the email outbox. Inbox placement depends on the EmailJS sender configuration and domain authentication. Obtain consent before enabling photo attachments and follow the institution's image-retention policy.
 - **Biometric privacy:** Student reference photos and face descriptors are sensitive data. Limit access to authorized staff and protect the database and API credentials.
 
 ##  Members

@@ -21,6 +21,7 @@ const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const respond = (res, code, body) => res.status(code).json(body);
 
 const LIVE_SITE_ORIGIN = "https://lewis-see.vercel.app";
+const EMAIL_FROM_NAME = "LewisSee | The Lewis College";
 
 async function sendEmailJs(credentials, templateParams, { maxAttempts = 3 } = {}) {
   requireEmailJsSettings(credentials, "Email");
@@ -97,6 +98,7 @@ async function notifyInstructorDecision(instructor, decision) {
     instructor_email: recipient,
     email: recipient,
     to_name: instructor.name,
+    from_name: EMAIL_FROM_NAME,
     subject: approved
       ? "LewisSee instructor access approved"
       : suspended
@@ -124,6 +126,7 @@ async function notifyInstructorUpdate(instructor, changedFields) {
     instructor_email: recipient,
     email: recipient,
     to_name: instructor.name,
+    from_name: EMAIL_FROM_NAME,
     subject: "LewisSee instructor account update",
     ...(configuredReplyTo ? { reply_to: configuredReplyTo } : {}),
     instructor_name: instructor.name,
@@ -156,7 +159,7 @@ async function notifyAdminsOfInstructorRequest(pool, instructor, blocks) {
           recipient_email: recipient,
           email: recipient,
           to_name: "Administrator",
-          from_name: "LewisSee Instructor Requests",
+          from_name: EMAIL_FROM_NAME,
           reply_to: instructor.email,
           subject: "Instructor access request - LewisSee",
           instructor_name: instructor.name,
