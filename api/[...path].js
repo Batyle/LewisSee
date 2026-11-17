@@ -8,6 +8,7 @@ import { sendWithRetry } from "../src/api/emailRetry.js";
 import {
   ADMIN_INSTRUCTOR_EMAILJS,
   INSTRUCTOR_REQUEST_EMAILJS,
+  requireEmailJsSettings,
 } from "../src/api/emailConfig.js";
 import {
   acquireInstructorSession,
@@ -22,6 +23,7 @@ const respond = (res, code, body) => res.status(code).json(body);
 const LIVE_SITE_ORIGIN = "https://lewis-see.vercel.app";
 
 async function sendEmailJs(credentials, templateParams, { maxAttempts = 3 } = {}) {
+  requireEmailJsSettings(credentials, "Email");
   await sendWithRetry(async () => {
     const emailResponse = await fetch("https://api.emailjs.com/api/v1.0/email/send", {
       method: "POST",

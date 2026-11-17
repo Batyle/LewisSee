@@ -51,8 +51,14 @@ The interface responds to user and browser events to keep attendance workflows i
 
 ## System Requirements
 
-- **Internet access:** The app relies on hosted database and API services for shared attendance data. The liveness service must be running locally for local scanning or deployed to an HTTPS endpoint for public deployments.
-- **Camera permission and secure context:** The instructor must allow camera access from the browser before scanning starts. Camera access generally requires HTTPS, except on localhost.
+- **Internet access:** The production Vercel site uses the live Vercel API routes, Aiven MySQL, the Render attendance API, and the deployed HTTPS liveness endpoint. Production builds use the live HTTPS endpoints.
+- **Camera permission and secure context:** The instructor must allow camera access from the browser before scanning starts. The deployed production site requires HTTPS.
+
+## Live deployment configuration
+
+The production frontend endpoints are `https://lewissee.onrender.com/attendance` and `https://liveliness-server.vercel.app/liveness`. Admin and instructor account APIs use the same-origin Vercel `/api` routes. `.env.production` contains only public frontend endpoints and EmailJS browser configuration; `VITE_*` EmailJS public keys are included in browser code and are not secrets.
+
+In Vercel Project Settings → Environment Variables, configure the Aiven connection (`DB_HOST`, `DB_PORT`, `DB_DATABASE`, `DB_USERNAME`, `DB_PASSWORD`, `DB_SSL_MODE=REQUIRED`) and a random `ADMIN_JWT_SECRET` of at least 32 characters. Use the same `ADMIN_JWT_SECRET` in the Render attendance service so it can validate Vercel-issued admin tokens. In Render, also configure the same Aiven credentials and a separate random `CRON_SECRET`; add that cron value as a GitHub Actions repository secret. Configure all nine `VITE_*EMAILJS*` variables from `.env.production` in Vercel and redeploy whenever those build-time settings change. Never put database credentials or JWT/cron secrets in `.env.production`, source code, or `VITE_*` variables.
 
 ## Limitations
 

@@ -1,7 +1,7 @@
 import emailjs from "@emailjs/browser";
 import { formatEmailDate, formatEmailTime } from "../attendancePolicy.js";
 import { sendWithRetry } from "./emailRetry.js";
-import { STUDENT_ATTENDANCE_EMAILJS } from "./emailConfig.js";
+import { requireEmailJsSettings, STUDENT_ATTENDANCE_EMAILJS } from "./emailConfig.js";
 
 const STATUS_STYLES = {
   Present: { color: "#087957", background: "#e6fbf5" },
@@ -10,6 +10,7 @@ const STATUS_STYLES = {
 };
 
 export async function sendAttendanceEmail(student, record, attendancePhoto, options) {
+  requireEmailJsSettings(STUDENT_ATTENDANCE_EMAILJS, "Student attendance");
   const recipient = student.email?.trim();
   if (!recipient) throw new Error("This student does not have an email address.");
 

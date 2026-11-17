@@ -1,6 +1,6 @@
 import emailjs from "@emailjs/browser";
 import { sendWithRetry } from "./emailRetry.js";
-import { ADMIN_INSTRUCTOR_EMAILJS } from "./emailConfig.js";
+import { ADMIN_INSTRUCTOR_EMAILJS, requireEmailJsSettings } from "./emailConfig.js";
 
 function buildDecisionParams(instructor, decision) {
   const approved = decision === "approved";
@@ -36,6 +36,7 @@ function buildDecisionParams(instructor, decision) {
 }
 
 export async function sendInstructorDecisionEmail(instructor, decision) {
+  requireEmailJsSettings(ADMIN_INSTRUCTOR_EMAILJS, "Admin-to-instructor");
   if (!instructor.email?.trim()) {
     throw new Error("The instructor account has no email address.");
   }
@@ -51,6 +52,7 @@ export async function sendInstructorDecisionEmail(instructor, decision) {
 }
 
 export async function sendInstructorUpdateEmail(instructor, changedFields) {
+  requireEmailJsSettings(ADMIN_INSTRUCTOR_EMAILJS, "Admin-to-instructor");
   if (!instructor.email?.trim()) {
     throw new Error("The instructor account has no email address.");
   }
